@@ -52,49 +52,78 @@ async function fetchMeeting(meetingId) {
 
   console.log(`\n📡 Fetching meeting ${meetingId} from Proshot...`);
 
-  // Primary endpoint (discovered from JS bundle)
-  const primaryUrl = `${BACKEND}/enterprise-api/meetings/view/meeting?document_id=${meetingId}`;
-
+  // Primary: recording-hub (discovered from browser DevTools — requires Firebase JWT)
+  const recordingHubUrl = `${BACKEND}/recording-hub/v1/recording/${meetingId}`;
   for (const authHeaders of AUTH_STYLES(API_KEY)) {
     const authLabel = Object.keys(authHeaders)[0];
-    process.stdout.write(`  Trying enterprise-api [${authLabel}]... `);
-    const result = await tryFetch(primaryUrl, authHeaders);
+    process.stdout.write(`  Trying recording-hub [${authLabel}]... `);
+    const result = await tryFetch(recordingHubUrl, authHeaders);
     if (result.ok) {
       console.log(`✅ SUCCESS`);
+      // Also fetch transcript from snippet API
+      const transcript = await fetchTranscriptFromSnippet(meetingId, result.data, authHeaders);
+      if (transcript) result.data._transcript = transcript;
       return normalizeMeeting(result.data, meetingId);
     }
     console.log(`❌ ${result.status} — ${result.error}`);
   }
 
-  // Fallback endpoints
-  const fallbacks = [
-    `${BACKEND}/enterprise-api/v1/recording/get_follow_up_email?document_id=${meetingId}`,
-    `${BACKEND}/enterprise-api/v1/calendar/synced_meeting?document_id=${meetingId}`,
-  ];
-
-  for (const url of fallbacks) {
-    for (const authHeaders of AUTH_STYLES(API_KEY)) {
-      const result = await tryFetch(url, authHeaders);
-      if (result.ok) {
-        console.log(`✅ SUCCESS via fallback: ${url}`);
-        return normalizeMeeting(result.data, meetingId);
-      }
+  // Fallback: enterprise-api view endpoint
+  const enterpriseUrl = `${BACKEND}/enterprise-api/meetings/view/meeting?document_id=${meetingId}`;
+  for (const authHeaders of AUTH_STYLES(API_KEY)) {
+    const result = await tryFetch(enterpriseUrl, authHeaders);
+    if (result.ok) {
+      console.log(`✅ SUCCESS via enterprise-api`);
+      return normalizeMeeting(result.data, meetingId);
     }
   }
 
   throw new Error(
     `Could not fetch meeting ${meetingId}.\n` +
-    `  Cause: Proshot uses Firebase session auth. The ps_ API key is tied to a\n` +
-    `  specific account — the meeting must be owned by that account to be accessible.\n` +
+    `  Proshot requires a Firebase JWT — the ps_ key alone won't work.\n` +
     `  \n` +
-    `  Fix: Use --file to load meeting data from a local JSON file:\n` +
-    `    node run.js --file data/sample-meeting.json\n` +
+    `  To get a Firebase token:\n` +
+    `    1. Open app.proshort.ai and go to any meeting\n` +
+    `    2. DevTools → Network → filter backend.proshort.ai\n` +
+    `    3. Copy the Authorization: Bearer eyJ... header\n` +
+    `    4. Set PROSHOT_API_KEY=<that token> in .env\n` +
     `  \n` +
-    `  To export a meeting from Proshot:\n` +
-    `    1. Open the meeting at app.proshort.ai/meetings/<id>\n` +
-    `    2. Use your browser devtools Network tab to capture the API response\n` +
-    `    3. Save the JSON to data/<meeting-id>.json`
+    `  Or use --file with a saved JSON:\n` +
+    `    node run.js --file data/<meeting-id>.json`
   );
+}
+
+async function fetchTranscriptFromSnippet(meetingId, recordingData, authHeaders) {
+  try {
+    // Extract customer_id from recording data
+    const customerId = recordingData.customer_id ||
+      (recordingData.thumbnail_url || '').match(/ps_videos\/sales_copilot\/([^/]+)\//)?.[1];
+    if (!customerId) return null;
+
+    const res = await fetch(`${BACKEND}/snippet/v1/transcript/get_transcript_and_highlights`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ document_id: meetingId, customer_id: customerId }),
+      timeout: 10000,
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const sentences = data?.transcript?.sentence_list || [];
+    if (sentences.length === 0) return null;
+
+    const lines = [];
+    let prevSpeaker = null;
+    for (const s of sentences) {
+      const speaker = s.speaker || 'Unknown';
+      const text = (s.text || '').trim();
+      if (!text) continue;
+      if (speaker !== prevSpeaker) { lines.push(`${speaker}: ${text}`); prevSpeaker = speaker; }
+      else lines[lines.length - 1] += ' ' + text;
+    }
+    return lines.join('\n\n');
+  } catch {
+    return null;
+  }
 }
 
 async function fetchAllMeetings(days = 7) {
@@ -179,13 +208,15 @@ function extractMeetingsList(data) {
 }
 
 function normalizeMeeting(raw, id) {
+  // recording-hub shape uses _transcript injected by fetchTranscriptFromSnippet
+  const transcript = raw._transcript || extractTranscript(raw);
   return {
-    id: id || raw.id || raw.document_id || raw.meeting_id || 'unknown',
-    title: raw.title || raw.name || raw.meeting_title || raw.subject ||
-           raw.meeting_name || `Meeting ${id}`,
-    date: raw.date || raw.created_at || raw.start_time || raw.meeting_date ||
-          raw.startTime || new Date().toISOString(),
-    transcript: extractTranscript(raw),
+    id: id || raw.document_id || raw.id || raw.meeting_id || 'unknown',
+    title: raw.event_title || raw.title || raw.name || raw.meeting_title ||
+           raw.subject || raw.meeting_name || `Meeting ${id}`,
+    date: raw.scheduled_time || raw.date || raw.created_at || raw.start_time ||
+          raw.meeting_date || raw.startTime || new Date().toISOString(),
+    transcript,
     proshortOutput: extractProshortOutput(raw),
     raw,
   };
@@ -218,9 +249,42 @@ function extractTranscript(raw) {
 }
 
 function extractProshortOutput(raw) {
-  // Handle nested meeting_details shape (from view endpoint)
-  const details = raw.meeting_details || raw;
+  // recording-hub shape: overview (markdown), crm_notes_synced, call_sentiment, deal_probability
+  if (raw.overview) {
+    const overview = raw.overview;
+    // Parse action items from markdown bullets under "Action Items" section
+    const actionSection = overview.match(/Action Items\*\*([\s\S]*?)(?:\*\*:|$)/)?.[1] || '';
+    const actionItems = actionSection
+      .split('\n')
+      .filter(l => l.trim().startsWith('-'))
+      .map(l => {
+        const text = l.replace(/^-\s*/, '').trim();
+        const ownerMatch = text.match(/^([^-]+?)\s*-\s*(.+?)\s*-\s*(.+)$/);
+        if (ownerMatch) return { owner: ownerMatch[1].trim(), task: ownerMatch[2].trim(), due: ownerMatch[3].trim() };
+        return { owner: '', task: text, due: '' };
+      });
 
+    const crm = raw.crm_notes_synced || {};
+    return {
+      summary: overview,
+      actionItems,
+      crmFields: {
+        deal_stage: crm.notes_status || '',
+        deal_probability: raw.deal_probability || '',
+        deal_name: crm.deal_name || '',
+        call_sentiment: raw.call_sentiment || '',
+        crm_integration: crm.integration_type || '',
+        risks: extractSection(overview, 'Risks Obstacles'),
+        pain_points: extractSection(overview, 'Pain Points'),
+        buying_signals: extractSection(overview, 'Customer Reactions'),
+        next_steps: extractSection(overview, 'Decision Process'),
+        competitors_mentioned: '',
+      },
+    };
+  }
+
+  // Fallback: nested meeting_details shape (from enterprise-api view endpoint)
+  const details = raw.meeting_details || raw;
   return {
     summary: details.summary || details.ai_summary || details.meeting_summary ||
              details.notes || details.description || '',
@@ -235,6 +299,13 @@ function extractProshortOutput(raw) {
       ...(details.crm_fields || details.crmFields || details.crm || {}),
     },
   };
+}
+
+function extractSection(markdown, sectionName) {
+  const match = markdown.match(new RegExp(`${sectionName}\\*\\*([\\s\\S]*?)(?:\\*\\*:|$)`));
+  if (!match) return '';
+  return match[1].split('\n').filter(l => l.trim().startsWith('-'))
+    .map(l => l.replace(/^-\s*/, '').trim()).join('; ');
 }
 
 function loadMeetingFromFile(filePath) {

@@ -5,30 +5,22 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 
+// ── Discovered via reverse-engineering app.proshort.ai JS bundles ──────────
+// Real backend: https://backend.proshort.ai/enterprise-api/...
+// Auth note: Proshot uses Firebase Auth internally; the ps_ key is passed
+// as Authorization: Bearer. The /meetings/view/meeting endpoint is publicly
+// reachable but requires the key to match the meeting owner's account.
+// If the key doesn't own the meeting → view_status: UNAUTHORISED
+// ──────────────────────────────────────────────────────────────────────────
+
 const API_KEY = process.env.PROSHOT_API_KEY;
-
-// Endpoint candidates to try in order
-const ENDPOINT_CANDIDATES = [
-  'https://api.proshort.ai/v1/meetings',
-  'https://api.proshort.ai/v1/calls',
-  'https://api.proshort.ai/api/v1/meetings',
-  'https://api.proshort.ai/v1/recordings',
-  'https://api.proshort.ai/meetings',
-];
-
-const MEETING_ENDPOINT_CANDIDATES = (id) => [
-  `https://api.proshort.ai/v1/meetings/${id}`,
-  `https://api.proshort.ai/v1/calls/${id}`,
-  `https://api.proshort.ai/api/v1/meetings/${id}`,
-  `https://api.proshort.ai/v1/recordings/${id}`,
-  `https://api.proshort.ai/meetings/${id}`,
-];
+const BACKEND = 'https://backend.proshort.ai';
 
 const AUTH_STYLES = (key) => [
   { Authorization: `Bearer ${key}` },
   { Authorization: key },
   { 'x-api-key': key },
-  { 'X-API-Key': key },
+  { 'X-Proshort-Api-Key': key },
 ];
 
 async function tryFetch(url, headers) {
@@ -37,9 +29,14 @@ async function tryFetch(url, headers) {
     const text = await res.text();
     if (res.ok) {
       try {
-        return { ok: true, data: JSON.parse(text), status: res.status };
+        const data = JSON.parse(text);
+        // Proshot returns 200 with view_status: UNAUTHORISED for public share links
+        if (data.view_status === 'UNAUTHORISED') {
+          return { ok: false, error: 'UNAUTHORISED — meeting not owned by this API key', status: 403 };
+        }
+        return { ok: true, data, status: res.status };
       } catch {
-        return { ok: false, error: `Non-JSON response: ${text.slice(0, 200)}`, status: res.status };
+        return { ok: false, error: `Non-JSON: ${text.slice(0, 200)}`, status: res.status };
       }
     }
     return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 200)}`, status: res.status };
@@ -48,100 +45,153 @@ async function tryFetch(url, headers) {
   }
 }
 
-async function discoverWorkingEndpoint() {
-  console.log('🔍 Probing Proshot API endpoints...');
-  for (const url of ENDPOINT_CANDIDATES) {
-    for (const authHeaders of AUTH_STYLES(API_KEY)) {
-      const authLabel = Object.keys(authHeaders)[0];
-      process.stdout.write(`  Trying ${url} [${authLabel}]... `);
-      const result = await tryFetch(url, authHeaders);
-      if (result.ok) {
-        console.log(`✅ SUCCESS`);
-        console.log('  Response keys:', Object.keys(result.data));
-        return { url, headers: authHeaders, data: result.data };
-      }
-      console.log(`❌ ${result.status}`);
-    }
-  }
-  return null;
-}
-
 async function fetchMeeting(meetingId) {
-  if (!API_KEY || API_KEY === 'your_fresh_proshot_key_here') {
+  if (!API_KEY || API_KEY.includes('PASTE_YOUR')) {
     throw new Error('PROSHOT_API_KEY not configured in .env');
   }
 
-  console.log(`\n📡 Fetching meeting ${meetingId} from Proshot API...`);
+  console.log(`\n📡 Fetching meeting ${meetingId} from Proshot...`);
 
-  for (const url of MEETING_ENDPOINT_CANDIDATES(meetingId)) {
+  // Primary endpoint (discovered from JS bundle)
+  const primaryUrl = `${BACKEND}/enterprise-api/meetings/view/meeting?document_id=${meetingId}`;
+
+  for (const authHeaders of AUTH_STYLES(API_KEY)) {
+    const authLabel = Object.keys(authHeaders)[0];
+    process.stdout.write(`  Trying enterprise-api [${authLabel}]... `);
+    const result = await tryFetch(primaryUrl, authHeaders);
+    if (result.ok) {
+      console.log(`✅ SUCCESS`);
+      return normalizeMeeting(result.data, meetingId);
+    }
+    console.log(`❌ ${result.status} — ${result.error}`);
+  }
+
+  // Fallback endpoints
+  const fallbacks = [
+    `${BACKEND}/enterprise-api/v1/recording/get_follow_up_email?document_id=${meetingId}`,
+    `${BACKEND}/enterprise-api/v1/calendar/synced_meeting?document_id=${meetingId}`,
+  ];
+
+  for (const url of fallbacks) {
     for (const authHeaders of AUTH_STYLES(API_KEY)) {
-      const authLabel = Object.keys(authHeaders)[0];
-      process.stdout.write(`  Trying ${url} [${authLabel}]... `);
       const result = await tryFetch(url, authHeaders);
       if (result.ok) {
-        console.log(`✅ SUCCESS`);
+        console.log(`✅ SUCCESS via fallback: ${url}`);
         return normalizeMeeting(result.data, meetingId);
       }
-      console.log(`❌ ${result.status}`);
     }
   }
 
   throw new Error(
-    `Could not fetch meeting ${meetingId} from any Proshot endpoint. ` +
-    `Check your API key and try loading from a JSON file with --file path/to/meeting.json`
+    `Could not fetch meeting ${meetingId}.\n` +
+    `  Cause: Proshot uses Firebase session auth. The ps_ API key is tied to a\n` +
+    `  specific account — the meeting must be owned by that account to be accessible.\n` +
+    `  \n` +
+    `  Fix: Use --file to load meeting data from a local JSON file:\n` +
+    `    node run.js --file data/sample-meeting.json\n` +
+    `  \n` +
+    `  To export a meeting from Proshot:\n` +
+    `    1. Open the meeting at app.proshort.ai/meetings/<id>\n` +
+    `    2. Use your browser devtools Network tab to capture the API response\n` +
+    `    3. Save the JSON to data/<meeting-id>.json`
   );
 }
 
 async function fetchAllMeetings(days = 7) {
-  if (!API_KEY || API_KEY === 'your_fresh_proshot_key_here') {
+  if (!API_KEY || API_KEY.includes('PASTE_YOUR')) {
     throw new Error('PROSHOT_API_KEY not configured in .env');
   }
 
-  console.log(`\n📡 Fetching meetings from last ${days} days...`);
+  console.log(`\n📡 Fetching meetings (last ${days} days) from Proshot...`);
+
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  for (const url of ENDPOINT_CANDIDATES) {
-    const urlWithParams = `${url}?from=${cutoff}&limit=100`;
+  // Known list endpoints from JS bundle analysis
+  const listUrls = [
+    `${BACKEND}/enterprise-api/recent_activity/overview`,
+    `${BACKEND}/enterprise-api/v1/calendar/synced_meeting`,
+    `${BACKEND}/enterprise-api/profiles/videos/posted`,
+  ];
+
+  for (const url of listUrls) {
     for (const authHeaders of AUTH_STYLES(API_KEY)) {
-      const authLabel = Object.keys(authHeaders)[0];
-      process.stdout.write(`  Trying ${urlWithParams} [${authLabel}]... `);
-      const result = await tryFetch(urlWithParams, authHeaders);
+      const result = await tryFetch(url, authHeaders);
       if (result.ok) {
-        console.log(`✅ SUCCESS`);
+        console.log(`✅ Got meeting list from ${url}`);
         const meetings = extractMeetingsList(result.data);
-        return meetings.map(m => normalizeMeeting(m, m.id || m.meetingId || m.call_id));
+        return meetings
+          .filter(m => !cutoff || new Date(m.date || m.created_at || 0) >= new Date(cutoff))
+          .map(m => normalizeMeeting(m, m.document_id || m.id || m.meeting_id));
       }
-      console.log(`❌ ${result.status}`);
     }
   }
 
-  throw new Error('Could not fetch meetings list from any Proshot endpoint.');
+  throw new Error(
+    'Could not fetch meeting list. Use --file to load individual meetings from JSON files.'
+  );
+}
+
+async function discoverWorkingEndpoint() {
+  console.log('🔍 Probing Proshot API endpoints...');
+  console.log('   Backend discovered from JS bundle: backend.proshort.ai/enterprise-api/\n');
+
+  const testUrls = [
+    `${BACKEND}/enterprise-api/meetings/view/meeting?document_id=test`,
+    `${BACKEND}/enterprise-api/recent_activity/overview`,
+    `${BACKEND}/enterprise-api/v1/calendar/synced_meeting`,
+    `${BACKEND}/enterprise-api/members`,
+    `${BACKEND}/enterprise-api/profiles/videos/posted`,
+  ];
+
+  let found = null;
+  for (const url of testUrls) {
+    for (const authHeaders of AUTH_STYLES(API_KEY)) {
+      const authLabel = Object.keys(authHeaders)[0];
+      process.stdout.write(`  ${url} [${authLabel}]... `);
+      const result = await tryFetch(url, authHeaders);
+      const status = result.status === 0 ? 'ERR' : result.status;
+      if (result.ok) {
+        console.log(`✅ 200 — keys: ${Object.keys(result.data).join(', ')}`);
+        if (!found) found = { url, headers: authHeaders, data: result.data };
+      } else {
+        console.log(`❌ ${status}`);
+      }
+    }
+  }
+
+  if (!found) {
+    console.log('\n⚠️  No fully accessible endpoint found.');
+    console.log('   The ps_ API key authenticates but Proshot uses Firebase session auth.');
+    console.log('   Meetings are accessible only if owned by the key\'s Firebase account.');
+    console.log('   Use --file to load meeting JSON files exported from Proshot.');
+  }
+  return found;
 }
 
 function extractMeetingsList(data) {
-  // Handle various response shapes
   if (Array.isArray(data)) return data;
-  if (data.meetings) return data.meetings;
-  if (data.calls) return data.calls;
-  if (data.recordings) return data.recordings;
-  if (data.data) return Array.isArray(data.data) ? data.data : [data.data];
-  return [data];
+  if (data.meetings) return Array.isArray(data.meetings) ? data.meetings : [];
+  if (data.calls) return Array.isArray(data.calls) ? data.calls : [];
+  if (data.recordings) return Array.isArray(data.recordings) ? data.recordings : [];
+  if (data.videos) return Array.isArray(data.videos) ? data.videos : [];
+  if (data.data && Array.isArray(data.data)) return data.data;
+  return [];
 }
 
 function normalizeMeeting(raw, id) {
-  // Normalize various Proshot response shapes into our standard format
   return {
-    id: id || raw.id || raw.meetingId || raw.call_id || 'unknown',
-    title: raw.title || raw.name || raw.meeting_title || raw.subject || `Meeting ${id}`,
-    date: raw.date || raw.created_at || raw.start_time || raw.startTime || new Date().toISOString(),
+    id: id || raw.id || raw.document_id || raw.meeting_id || 'unknown',
+    title: raw.title || raw.name || raw.meeting_title || raw.subject ||
+           raw.meeting_name || `Meeting ${id}`,
+    date: raw.date || raw.created_at || raw.start_time || raw.meeting_date ||
+          raw.startTime || new Date().toISOString(),
     transcript: extractTranscript(raw),
-    proshortOutput: extractPrshortOutput(raw),
+    proshortOutput: extractProshortOutput(raw),
     raw,
   };
 }
 
 function extractTranscript(raw) {
-  // Try all known field names for transcript
   const candidates = [
     raw.transcript,
     raw.transcription,
@@ -149,39 +199,44 @@ function extractTranscript(raw) {
     raw.raw_transcript,
     raw.call_transcript,
     raw.meeting_transcript,
+    raw.content,
   ];
+
   for (const c of candidates) {
-    if (c && typeof c === 'string' && c.length > 10) return c;
-    if (c && typeof c === 'object') {
-      // Could be array of speaker turns
-      if (Array.isArray(c)) {
-        return c.map(turn => {
-          const speaker = turn.speaker || turn.name || turn.participant || 'Unknown';
-          const text = turn.text || turn.content || turn.transcript || '';
-          return `${speaker}: ${text}`;
-        }).join('\n');
-      }
+    if (c && typeof c === 'string' && c.length > 20) return c;
+    if (Array.isArray(c) && c.length > 0) {
+      return c.map(turn => {
+        const speaker = turn.speaker || turn.name || turn.participant || turn.role || 'Unknown';
+        const text = turn.text || turn.content || turn.transcript || turn.message || '';
+        const ts = turn.timestamp || turn.time || '';
+        return ts ? `[${ts}] ${speaker}: ${text}` : `${speaker}: ${text}`;
+      }).join('\n');
     }
   }
-  return raw.transcript || '[No transcript available]';
+
+  return raw.transcript || '[No transcript available — load from file with --file path/to/meeting.json]';
 }
 
-function extractPrshortOutput(raw) {
+function extractProshortOutput(raw) {
+  // Handle nested meeting_details shape (from view endpoint)
+  const details = raw.meeting_details || raw;
+
   return {
-    summary: raw.summary || raw.ai_summary || raw.meeting_summary || raw.notes || '',
-    actionItems: raw.action_items || raw.actionItems || raw.tasks || raw.todos || [],
+    summary: details.summary || details.ai_summary || details.meeting_summary ||
+             details.notes || details.description || '',
+    actionItems: details.action_items || details.actionItems || details.tasks ||
+                 details.todos || details.follow_ups || [],
     crmFields: {
-      dealStage: raw.deal_stage || raw.dealStage || raw.crm?.deal_stage || '',
-      nextSteps: raw.next_steps || raw.nextSteps || raw.crm?.next_steps || '',
-      risks: raw.risks || raw.crm?.risks || '',
-      painPoints: raw.pain_points || raw.painPoints || raw.crm?.pain_points || '',
-      buyingSignals: raw.buying_signals || raw.buyingSignals || raw.crm?.buying_signals || '',
-      ...((raw.crm_fields || raw.crmFields || raw.crm) || {}),
+      dealStage: details.deal_stage || details.dealStage || '',
+      nextSteps: details.next_steps || details.nextSteps || '',
+      risks: details.risks || details.risk_factors || '',
+      painPoints: details.pain_points || details.painPoints || '',
+      buyingSignals: details.buying_signals || details.buyingSignals || '',
+      ...(details.crm_fields || details.crmFields || details.crm || {}),
     },
   };
 }
 
-// Load a meeting from a local JSON file (fallback when API is unavailable)
 function loadMeetingFromFile(filePath) {
   const resolved = path.resolve(filePath);
   console.log(`\n📂 Loading meeting from file: ${resolved}`);
@@ -191,8 +246,14 @@ function loadMeetingFromFile(filePath) {
   }
 
   const raw = JSON.parse(fs.readFileSync(resolved, 'utf-8'));
-  const id = raw.id || raw.meetingId || path.basename(filePath, '.json');
+  const id = raw.id || raw.meetingId || raw.document_id ||
+             path.basename(filePath, '.json');
   return normalizeMeeting(raw, id);
 }
 
-module.exports = { fetchMeeting, fetchAllMeetings, loadMeetingFromFile, discoverWorkingEndpoint };
+module.exports = {
+  fetchMeeting,
+  fetchAllMeetings,
+  loadMeetingFromFile,
+  discoverWorkingEndpoint,
+};

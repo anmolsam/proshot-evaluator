@@ -11,6 +11,37 @@ const { formatScore, verdictEmoji } = require('./src/utils');
 
 const args = process.argv.slice(2);
 
+function checkEnv() {
+  const missing = [];
+  if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.includes('PASTE_YOUR')) missing.push('ANTHROPIC_API_KEY');
+  if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.includes('PASTE_YOUR')) missing.push('OPENAI_API_KEY');
+  if (missing.length > 0) {
+    console.error('\n❌ Missing required API keys in .env:\n');
+    missing.forEach(k => console.error(`   ${k}=<your key here>`));
+    console.error('\nGet them at:');
+    console.error('   Anthropic → https://console.anthropic.com/settings/keys');
+    console.error('   OpenAI    → https://platform.openai.com/api-keys\n');
+    process.exit(1);
+  }
+}
+
+function printStatus() {
+  const keys = {
+    'ANTHROPIC_API_KEY': process.env.ANTHROPIC_API_KEY,
+    'OPENAI_API_KEY': process.env.OPENAI_API_KEY,
+    'PROSHOT_API_KEY': process.env.PROSHOT_API_KEY,
+    'AIRTABLE_TOKEN': process.env.AIRTABLE_TOKEN,
+    'AIRTABLE_BASE_ID': process.env.AIRTABLE_BASE_ID,
+  };
+  console.log('\n🔑 API Key Status:');
+  for (const [k, v] of Object.entries(keys)) {
+    const ok = v && !v.includes('PASTE_YOUR') && !v.includes('PASTE_BASE');
+    const masked = ok ? `${v.slice(0, 8)}...${v.slice(-4)}` : '❌ NOT SET';
+    console.log(`   ${ok ? '✅' : '❌'} ${k}: ${masked}`);
+  }
+  console.log();
+}
+
 function printUsage() {
   console.log(`
 Proshot Meeting Evaluator
@@ -22,6 +53,8 @@ Usage:
   node run.js --discover              Probe Proshot API endpoints
   node run.js --rules                 Show current prompt rules
   node run.js --serve                 Start dashboard server
+  node run.js --status                Show API key status
+  node run.js --setup                 Create Airtable tables
   node run.js --help                  Show this help
 `);
 }
@@ -66,6 +99,16 @@ async function main() {
     return;
   }
 
+  if (args.includes('--status')) {
+    printStatus();
+    return;
+  }
+
+  if (args.includes('--setup')) {
+    require('./setup-airtable');
+    return;
+  }
+
   if (args.includes('--serve')) {
     const server = require('./server');
     return; // server.js starts itself
@@ -93,6 +136,11 @@ async function main() {
       });
     }
     return;
+  }
+
+  // All commands below require AI keys
+  if (!args.includes('--rules') && !args.includes('--discover')) {
+    checkEnv();
   }
 
   if (args.includes('--file')) {

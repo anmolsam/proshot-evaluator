@@ -1,0 +1,18 @@
+{
+  "name": "proshot-evaluator",
+  "version": "1.0.0",
+  "description": "AI-powered meeting evaluation system using Claude + GPT-4o as dual judges",
+  "main": "run.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node run.js --serve",
+    "evaluate": "node run.js --meeting"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "node-fetch": "^2.7.0",
+    "openai": "latest"
+  }
+}

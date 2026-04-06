@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proshot Evaluator Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+
+  header { background: #1a1d27; border-bottom: 1px solid #2d3748; padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.25rem; font-weight: 700; color: #fff; }
+  header span { font-size: 0.8rem; color: #718096; }
+
+  .stats-bar { display: flex; gap: 1rem; padding: 1rem 2rem; background: #1a1d27; border-bottom: 1px solid #2d3748; flex-wrap: wrap; }
+  .stat { background: #252836; border-radius: 8px; padding: 0.75rem 1.25rem; min-width: 120px; }
+  .stat .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #718096; margin-bottom: 4px; }
+  .stat .value { font-size: 1.5rem; font-weight: 700; }
+  .stat.green .value { color: #48bb78; }
+  .stat.yellow .value { color: #ecc94b; }
+  .stat.red .value { color: #fc8181; }
+  .stat.avg .value { color: #63b3ed; }
+
+  .main { display: grid; grid-template-columns: 1fr 400px; gap: 0; height: calc(100vh - 130px); }
+
+  .meetings-panel { overflow-y: auto; padding: 1.5rem; border-right: 1px solid #2d3748; }
+  .meetings-panel h2 { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; color: #718096; margin-bottom: 1rem; }
+
+  .meeting-card { background: #1e2130; border: 1px solid #2d3748; border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem; cursor: pointer; transition: border-color 0.2s, background 0.2s; }
+  .meeting-card:hover, .meeting-card.selected { border-color: #4c6ef5; background: #252942; }
+  .meeting-card .meta { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .meeting-card .title { font-weight: 600; font-size: 0.95rem; }
+  .meeting-card .date { font-size: 0.75rem; color: #718096; margin-top: 2px; }
+
+  .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 48px; padding: 2px 8px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; }
+  .badge.green { background: rgba(72, 187, 120, 0.15); color: #48bb78; border: 1px solid rgba(72, 187, 120, 0.3); }
+  .badge.yellow { background: rgba(236, 201, 75, 0.15); color: #ecc94b; border: 1px solid rgba(236, 201, 75, 0.3); }
+  .badge.red { background: rgba(252, 129, 129, 0.15); color: #fc8181; border: 1px solid rgba(252, 129, 129, 0.3); }
+
+  .scores { font-size: 0.75rem; color: #718096; margin-top: 4px; }
+  .disagree-badge { font-size: 0.7rem; color: #ecc94b; background: rgba(236, 201, 75, 0.1); padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(236, 201, 75, 0.2); }
+
+  .detail-panel { overflow-y: auto; padding: 1.5rem; }
+  .detail-panel h2 { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; color: #718096; margin-bottom: 1rem; }
+
+  .empty-state { color: #4a5568; text-align: center; padding: 3rem 1rem; }
+  .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+
+  .detail-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.25rem; }
+  .detail-meta { font-size: 0.8rem; color: #718096; margin-bottom: 1rem; }
+  .score-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+
+  .section { margin-bottom: 1.25rem; }
+  .section h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #718096; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 6px; }
+  .item-list { list-style: none; }
+  .item-list li { font-size: 0.85rem; color: #cbd5e0; padding: 6px 10px; border-left: 2px solid #2d3748; margin-bottom: 4px; border-radius: 0 4px 4px 0; background: rgba(255,255,255,0.02); }
+  .item-list.right li { border-left-color: #48bb78; }
+  .item-list.wrong li { border-left-color: #fc8181; }
+  .item-list.missed li { border-left-color: #ecc94b; }
+
+  .reasoning-box { font-size: 0.85rem; color: #a0aec0; background: rgba(255,255,255,0.03); border-radius: 6px; padding: 10px; border: 1px solid #2d3748; }
+
+  .tiebreaker-box { background: rgba(236, 201, 75, 0.05); border: 1px solid rgba(236, 201, 75, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 1rem; }
+  .tiebreaker-box h3 { color: #ecc94b; }
+  .tiebreaker-box .verdict-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-top: 4px; }
+  .verdict-tag.proshot_correct { background: rgba(72,187,120,0.15); color: #48bb78; }
+  .verdict-tag.proshot_incorrect { background: rgba(252,129,129,0.15); color: #fc8181; }
+
+  .human-decision { margin-top: 1rem; }
+  .human-decision h3 { font-size: 0.8rem; text-transform: uppercase; color: #718096; margin-bottom: 0.5rem; }
+  .human-decision input { width: 100%; background: #1e2130; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 6px; padding: 8px; font-size: 0.85rem; margin-bottom: 6px; }
+  .human-decision button { background: #4c6ef5; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.85rem; cursor: pointer; width: 100%; }
+  .human-decision button:hover { background: #5a7af7; }
+
+  .btn-eval { background: #4c6ef5; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 0.8rem; cursor: pointer; margin-top: 0.5rem; }
+  .btn-eval:hover { background: #5a7af7; }
+  .btn-eval:disabled { background: #2d3748; color: #718096; cursor: not-allowed; }
+
+  .rules-panel { padding: 1.5rem; }
+  .rule-item { background: #1e2130; border: 1px solid #2d3748; border-radius: 8px; padding: 10px; margin-bottom: 8px; font-size: 0.82rem; }
+  .rule-item .rule-text { color: #e2e8f0; margin-bottom: 4px; }
+  .rule-item .rule-why { color: #718096; font-size: 0.75rem; }
+
+  nav { display: flex; gap: 4px; padding: 0 2rem; background: #1a1d27; }
+  nav button { background: none; border: none; color: #718096; padding: 0.6rem 1rem; cursor: pointer; font-size: 0.85rem; border-bottom: 2px solid transparent; }
+  nav button.active { color: #63b3ed; border-bottom-color: #63b3ed; }
+  nav button:hover { color: #e2e8f0; }
+
+  .tab-content { display: none; height: 100%; }
+  .tab-content.active { display: flex; flex-direction: column; height: 100%; }
+  .tab-fill { flex: 1; overflow-y: auto; }
+
+  .loading { text-align: center; padding: 2rem; color: #718096; }
+  .error-msg { color: #fc8181; font-size: 0.85rem; padding: 8px; background: rgba(252,129,129,0.1); border-radius: 6px; margin-top: 8px; }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #1a1d27; }
+  ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🎯 Proshot Evaluator</h1>
+  <span>AI-powered dual-judge meeting quality analysis</span>
+</header>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat avg"><div class="label">Avg Score</div><div class="value" id="avgScore">—</div></div>
+  <div class="stat"><div class="label">Total</div><div class="value" id="totalCount">—</div></div>
+  <div class="stat green"><div class="label">🟢 Green</div><div class="value" id="greenCount">—</div></div>
+  <div class="stat yellow"><div class="label">🟡 Yellow</div><div class="value" id="yellowCount">—</div></div>
+  <div class="stat red"><div class="label">🔴 Red</div><div class="value" id="redCount">—</div></div>
+  <div class="stat"><div class="label">Rules</div><div class="value" id="rulesCount">—</div></div>
+</div>
+
+<nav>
+  <button class="active" onclick="showTab('evaluations')">Evaluations</button>
+  <button onclick="showTab('rules')">Prompt Rules</button>
+</nav>
+
+<div style="flex:1; overflow: hidden;">
+
+<!-- EVALUATIONS TAB -->
+<div id="tab-evaluations" class="tab-content active" style="height: calc(100vh - 185px);">
+  <div class="main">
+    <div class="meetings-panel">
+      <h2>Evaluated Meetings</h2>
+      <div id="meetingsList"><div class="loading">Loading evaluations...</div></div>
+    </div>
+    <div class="detail-panel" id="detailPanel">
+      <div class="empty-state">
+        <div class="icon">📋</div>
+        <p>Select a meeting to see the full breakdown</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RULES TAB -->
+<div id="tab-rules" class="tab-content" style="height: calc(100vh - 185px); overflow-y: auto;">
+  <div class="rules-panel">
+    <h2>Prompt Rules <span style="font-size:0.75rem; color:#718096; text-transform:none;">(auto-generated from tiebreaker decisions)</span></h2>
+    <div id="rulesList"><div class="loading">Loading rules...</div></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+let selectedMeetingId = null;
+let allEvaluations = [];
+
+async function loadStats() {
+  try {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+    document.getElementById('avgScore').textContent = data.avgScore || '—';
+    document.getElementById('totalCount').textContent = data.total || 0;
+    document.getElementById('greenCount').textContent = data.green || 0;
+    document.getElementById('yellowCount').textContent = data.yellow || 0;
+    document.getElementById('redCount').textContent = data.red || 0;
+  } catch(e) { console.error('Stats error', e); }
+
+  try {
+    const res = await fetch('/api/rules');
+    const data = await res.json();
+    document.getElementById('rulesCount').textContent = (data.rules || []).length;
+  } catch(e) {}
+}
+
+async function loadEvaluations() {
+  try {
+    const res = await fetch('/api/evaluations');
+    const data = await res.json();
+    allEvaluations = data.evaluations || [];
+    renderMeetingsList(allEvaluations);
+  } catch(e) {
+    document.getElementById('meetingsList').innerHTML = `<div class="error-msg">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderMeetingsList(evaluations) {
+  const el = document.getElementById('meetingsList');
+  if (!evaluations.length) {
+    el.innerHTML = `<div class="empty-state" style="padding:2rem;"><div class="icon">📭</div><p>No evaluations yet.<br>Run: <code>node run.js --meeting &lt;id&gt;</code></p></div>`;
+    return;
+  }
+  el.innerHTML = evaluations.map(ev => `
+    <div class="meeting-card ${selectedMeetingId === ev['Meeting ID'] ? 'selected' : ''}" onclick="showDetail('${ev['Meeting ID']}')">
+      <div class="meta">
+        <span class="badge ${ev['Verdict'] || 'yellow'}">${ev['Final Score'] || '?'}</span>
+        <span class="title">${ev['Meeting Title'] || ev['Meeting ID'] || 'Unknown'}</span>
+        ${ev['Disagreement'] ? '<span class="disagree-badge">⚖️ Disputed</span>' : ''}
+      </div>
+      <div class="date">${ev['Meeting Date'] || ev['Timestamp']?.split('T')[0] || ''}</div>
+      <div class="scores">Claude: ${ev['Claude Score'] || '?'} · GPT-4o: ${ev['GPT4o Score'] || '?'} · Diff: ${ev['Score Difference'] || 0}</div>
+    </div>
+  `).join('');
+}
+
+function showDetail(meetingId) {
+  selectedMeetingId = meetingId;
+  renderMeetingsList(allEvaluations);
+  const ev = allEvaluations.find(e => e['Meeting ID'] === meetingId);
+  if (!ev) return;
+
+  const right = (ev['What Proshot Got Right'] || '').split('\n• ').filter(Boolean);
+  const wrong = (ev['What Proshot Got Wrong'] || '').split('\n• ').filter(Boolean);
+  const missed = (ev['What Proshot Missed'] || '').split('\n• ').filter(Boolean);
+
+  document.getElementById('detailPanel').innerHTML = `
+    <div class="detail-title">${ev['Meeting Title'] || ev['Meeting ID']}</div>
+    <div class="detail-meta">ID: ${ev['Meeting ID']} · Date: ${ev['Meeting Date'] || '—'}</div>
+
+    <div class="score-row">
+      <span class="badge ${ev['Verdict'] || 'yellow'}" style="font-size:1rem; padding: 4px 14px;">${ev['Final Score']} ${ev['Verdict']?.toUpperCase()}</span>
+      <span style="font-size:0.8rem; color:#718096;">Claude: ${ev['Claude Score']} · GPT-4o: ${ev['GPT4o Score']} · Δ ${ev['Score Difference']}</span>
+    </div>
+
+    ${ev['Disagreement'] && ev['Tiebreaker Verdict'] ? `
+    <div class="tiebreaker-box">
+      <h3>⚖️ Tiebreaker Invoked</h3>
+      <div style="font-size:0.8rem; color:#a0aec0; margin: 4px 0;">Verdict: <span class="verdict-tag ${ev['Tiebreaker Verdict']}">${ev['Tiebreaker Verdict']}</span></div>
+      ${ev['Prompt Rule Generated'] ? `<div style="font-size:0.75rem; color:#718096; margin-top:6px;">Rule: ${ev['Prompt Rule Generated']}</div>` : ''}
+    </div>` : ''}
+
+    ${right.length ? `<div class="section">
+      <h3>✅ Got Right</h3>
+      <ul class="item-list right">${right.map(r => `<li>${r}</li>`).join('')}</ul>
+    </div>` : ''}
+
+    ${wrong.length ? `<div class="section">
+      <h3>❌ Got Wrong</h3>
+      <ul class="item-list wrong">${wrong.map(r => `<li>${r}</li>`).join('')}</ul>
+    </div>` : ''}
+
+    ${missed.length ? `<div class="section">
+      <h3>🔍 Missed</h3>
+      <ul class="item-list missed">${missed.map(r => `<li>${r}</li>`).join('')}</ul>
+    </div>` : ''}
+
+    ${ev['Verdict'] === 'yellow' ? `
+    <div class="human-decision">
+      <h3>📝 Human Decision</h3>
+      <input type="text" id="hdItem" placeholder="Disputed item description" value="${ev['Human Decision'] || ''}">
+      <select id="hdDecision" style="width:100%;background:#1e2130;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:8px;margin-bottom:6px;">
+        <option value="proshot_correct">Proshot was correct</option>
+        <option value="proshot_incorrect">Proshot was incorrect</option>
+        <option value="ambiguous">Ambiguous / needs more context</option>
+      </select>
+      <button onclick="saveHumanDecision('${ev['Meeting ID']}')">Save Decision</button>
+      <div id="hdStatus"></div>
+    </div>` : ''}
+  `;
+}
+
+async function saveHumanDecision(meetingId) {
+  const item = document.getElementById('hdItem').value.trim();
+  const decision = document.getElementById('hdDecision').value;
+  const status = document.getElementById('hdStatus');
+  if (!item) { status.innerHTML = '<div class="error-msg">Please describe the disputed item.</div>'; return; }
+  try {
+    const res = await fetch('/api/human-decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, item, decision }),
+    });
+    if (res.ok) status.innerHTML = '<div style="color:#48bb78;font-size:0.8rem;margin-top:6px;">✅ Saved</div>';
+    else status.innerHTML = '<div class="error-msg">Failed to save</div>';
+  } catch(e) { status.innerHTML = `<div class="error-msg">${e.message}</div>`; }
+}
+
+async function loadRules() {
+  try {
+    const res = await fetch('/api/rules');
+    const data = await res.json();
+    const rules = data.rules || [];
+    const el = document.getElementById('rulesList');
+    if (!rules.length) {
+      el.innerHTML = '<div class="empty-state" style="padding:2rem;"><div class="icon">📋</div><p>No rules yet. They are auto-generated when judges disagree.</p></div>';
+      return;
+    }
+    el.innerHTML = rules.map((r, i) => `
+      <div class="rule-item">
+        <div class="rule-text"><strong>Rule ${i+1}:</strong> ${r.rule}</div>
+        <div class="rule-why">Why: ${r.whyAmbiguous || '—'} · Applied: ${r.timesApplied || 0}× · Added: ${(r.dateAdded || '').split('T')[0]}</div>
+      </div>
+    `).join('');
+  } catch(e) {
+    document.getElementById('rulesList').innerHTML = `<div class="error-msg">Failed to load rules: ${e.message}</div>`;
+  }
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'rules') loadRules();
+}
+
+// Init
+loadStats();
+loadEvaluations();
+</script>
+</body>
+</html>

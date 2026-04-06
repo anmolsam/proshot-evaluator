@@ -2,11 +2,16 @@
 
 require('dotenv').config();
 const Anthropic = require('@anthropic-ai/sdk');
-const OpenAI = require('openai');
 const { parseJsonSafely, sleep } = require('./utils');
 
 const anthropic = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
-const openai = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
+
+const hasOpenAI = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 10);
+let openai = null;
+if (hasOpenAI) {
+  const OpenAI = require('openai');
+  openai = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
+}
 
 const DISSENTER_PROMPT = `You are a strict evidence-based auditor. In a previous evaluation, you and another AI judge disagreed about Proshot's meeting analysis. You scored it lower.
 
@@ -54,7 +59,7 @@ Now re-examine the transcript carefully and determine if your lower score was ju
     try {
       let result;
 
-      if (dissenterName === 'Claude') {
+      if (dissenterName === 'Claude' || dissenterName === 'Claude-Skeptic') {
         const stream = anthropic.messages.stream({
           model: 'claude-opus-4-6',
           max_tokens: 4096,

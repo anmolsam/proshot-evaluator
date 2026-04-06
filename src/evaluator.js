@@ -36,7 +36,9 @@ async function evaluateMeeting(meeting) {
 
     const dissenterIsClaude = claudeResult.overall_score < gptResult.overall_score;
     const dissenterResult = dissenterIsClaude ? claudeResult : gptResult;
-    const dissenterName = dissenterIsClaude ? 'Claude' : 'GPT-4o';
+    // gptResult.judge may be 'gpt4o' or 'claude-skeptic' depending on fallback
+    const gptJudgeName = gptResult.judge === 'claude-skeptic' ? 'Claude-Skeptic' : 'GPT-4o';
+    const dissenterName = dissenterIsClaude ? 'Claude' : gptJudgeName;
 
     tiebreakerResult = await runTiebreaker(
       transcript,

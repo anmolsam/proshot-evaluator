@@ -12,16 +12,13 @@ const { formatScore, verdictEmoji } = require('./src/utils');
 const args = process.argv.slice(2);
 
 function checkEnv() {
-  const missing = [];
-  if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.includes('PASTE_YOUR')) missing.push('ANTHROPIC_API_KEY');
-  if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.includes('PASTE_YOUR')) missing.push('OPENAI_API_KEY');
-  if (missing.length > 0) {
-    console.error('\n❌ Missing required API keys in .env:\n');
-    missing.forEach(k => console.error(`   ${k}=<your key here>`));
-    console.error('\nGet them at:');
-    console.error('   Anthropic → https://console.anthropic.com/settings/keys');
-    console.error('   OpenAI    → https://platform.openai.com/api-keys\n');
+  if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.includes('PASTE_YOUR')) {
+    console.error('\n❌ Missing required API key in .env: ANTHROPIC_API_KEY');
+    console.error('   Get it at: https://console.anthropic.com/settings/keys\n');
     process.exit(1);
+  }
+  if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.trim().length < 10) {
+    console.log('  ℹ️  OPENAI_API_KEY not set — Judge B will use Claude skeptic mode\n');
   }
 }
 

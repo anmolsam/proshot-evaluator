@@ -2,17 +2,28 @@
 
 require('dotenv').config();
 const Anthropic = require('@anthropic-ai/sdk');
+const OpenAI = require('openai');
 const { loadRules, buildJudgePromptWithRules } = require('./rules');
 const { parseJsonSafely, sleep } = require('./utils');
 
 const anthropic = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const hasOpenAI = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 10);
+const hasOpenRouter = !!(
+  process.env.OPENROUTER_API_KEY &&
+  process.env.OPENROUTER_API_KEY.trim().length > 10
+);
 
-let openai = null;
-if (hasOpenAI) {
-  const OpenAI = require('openai');
-  openai = new OpenAI.default({ apiKey: process.env.OPENAI_API_KEY });
+// OpenRouter uses the OpenAI-compatible API — just swap the base URL
+let openRouter = null;
+if (hasOpenRouter) {
+  openRouter = new OpenAI.default({
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseURL: 'https://openrouter.ai/api/v1',
+    defaultHeaders: {
+      'HTTP-Referer': 'https://github.com/anmolsam/proshot-evaluator',
+      'X-Title': 'Proshot Evaluator',
+    },
+  });
 }
 
 // ── Base judge prompt ─────────────────────────────────────────────────────
@@ -50,8 +61,7 @@ Respond ONLY in this exact JSON format, no preamble, no markdown:
   "reasoning": "2-3 sentence overall assessment"
 }`;
 
-// Skeptic variant — used as the second judge when OpenAI is unavailable.
-// Higher bar, focuses on gaps and omissions, runs at temperature 1 for diversity.
+// Skeptic variant — only used when OpenRouter is also unavailable
 const SKEPTIC_JUDGE_PROMPT = `You are a demanding sales operations analyst who evaluates AI meeting summaries with a critical eye.
 
 You will receive:
@@ -108,9 +118,7 @@ ${JSON.stringify(proshortOutput.crmFields || {}, null, 2)}`;
   return { systemPrompt: prompt, userContent };
 }
 
-async function callClaude(systemPrompt, userContent, temperature) {
-  // Note: Claude API doesn't support temperature with thinking enabled.
-  // We differentiate the two Claude calls via different system prompts.
+async function callClaude(systemPrompt, userContent) {
   const stream = anthropic.messages.stream({
     model: 'claude-opus-4-6',
     max_tokens: 4096,
@@ -125,8 +133,25 @@ async function callClaude(systemPrompt, userContent, temperature) {
   return parseJsonSafely(textBlock.text);
 }
 
+async function callOpenRouter(model, systemPrompt, userContent) {
+  const response = await openRouter.chat.completions.create({
+    model,
+    max_tokens: 4096,
+    temperature: 0,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent },
+    ],
+    response_format: { type: 'json_object' },
+  });
+
+  const text = response.choices[0]?.message?.content;
+  if (!text) throw new Error(`No content in OpenRouter response (${model})`);
+  return parseJsonSafely(text);
+}
+
 async function judgeWithClaude(transcript, proshortOutput) {
-  console.log('  🤖 Claude (optimist) judging...');
+  console.log('  🤖 Claude Opus 4.6 (optimist) judging...');
   const { systemPrompt, userContent } = buildMessages(transcript, proshortOutput, false);
 
   let lastErr;
@@ -147,9 +172,9 @@ async function judgeWithClaude(transcript, proshortOutput) {
 }
 
 async function judgeWithGPT4o(transcript, proshortOutput) {
-  if (!hasOpenAI) {
+  if (!hasOpenRouter) {
     // Fallback: second Claude with skeptic persona
-    console.log('  🤖 Claude (skeptic) judging... [OpenAI key not set — using Claude skeptic mode]');
+    console.log('  🤖 Claude (skeptic) judging... [OpenRouter key not set — using Claude skeptic mode]');
     const { systemPrompt, userContent } = buildMessages(transcript, proshortOutput, true);
 
     let lastErr;
@@ -169,28 +194,14 @@ async function judgeWithGPT4o(transcript, proshortOutput) {
     throw new Error(`Claude skeptic judging failed: ${lastErr.message}`);
   }
 
-  // Full GPT-4o path
-  console.log('  🤖 GPT-4o judging...');
-  const { systemPrompt, userContent } = buildMessages(transcript, proshortOutput, false);
+  // GPT-4o via OpenRouter — real independent second opinion
+  console.log('  🤖 GPT-4o via OpenRouter (skeptic) judging...');
+  const { systemPrompt, userContent } = buildMessages(transcript, proshortOutput, true);
 
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        max_tokens: 4096,
-        temperature: 0,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-        response_format: { type: 'json_object' },
-      });
-
-      const text = response.choices[0]?.message?.content;
-      if (!text) throw new Error('No content in GPT-4o response');
-
-      const result = parseJsonSafely(text);
+      const result = await callOpenRouter('openai/gpt-4o', systemPrompt, userContent);
       result.judge = 'gpt4o';
       result.overall_score = Math.round(Number(result.overall_score) || 0);
       console.log(`  ✅ GPT-4o score: ${result.overall_score}`);
@@ -204,4 +215,4 @@ async function judgeWithGPT4o(transcript, proshortOutput) {
   throw new Error(`GPT-4o judging failed: ${lastErr.message}`);
 }
 
-module.exports = { judgeWithClaude, judgeWithGPT4o, hasOpenAI };
+module.exports = { judgeWithClaude, judgeWithGPT4o, hasOpenRouter, callOpenRouter };

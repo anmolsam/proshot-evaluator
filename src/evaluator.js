@@ -36,32 +36,26 @@ async function evaluateMeeting(meeting) {
     verdict = scoreToVerdict(finalScore);
     console.log(`\n✅ Judges agree (diff: ${scoreDiff}). Final score: ${finalScore} → ${verdict}`);
   } else {
-    // Disagreement — make the dissenter justify with evidence
-    console.log(`\n⚠️  Judges disagree by ${scoreDiff} points. Invoking tiebreaker...`);
-
-    const dissenterIsClaude = claudeResult.overall_score < gptResult.overall_score;
-    const dissenterResult = dissenterIsClaude ? claudeResult : gptResult;
-    // gptResult.judge may be 'gpt4o' or 'claude-skeptic' depending on fallback
-    const gptJudgeName = gptResult.judge === 'claude-skeptic' ? 'Claude-Skeptic' : 'GPT-4o';
-    const dissenterName = dissenterIsClaude ? 'Claude' : gptJudgeName;
+    // Disagreement — Gemini 2.5 Pro arbitrates as neutral third party
+    console.log(`\n⚠️  Judges disagree by ${scoreDiff} points. Invoking Gemini arbiter...`);
 
     tiebreakerResult = await runTiebreaker(
       transcript,
       proshortOutput,
-      dissenterResult,
-      dissenterName
+      claudeResult,
+      gptResult
     );
 
+    // Use Gemini's independent final_score
+    finalScore = tiebreakerResult.final_score;
     if (tiebreakerResult.evidence_found) {
-      // Dissenter proved its case — flag for human review
-      finalScore = Math.round((claudeResult.overall_score + gptResult.overall_score) / 2);
-      verdict = 'yellow'; // Always yellow when dissenter found evidence
-      console.log(`  📋 Dissenter found evidence. Flagging for human review.`);
+      // Genuine dispute substantiated by transcript — flag for human review
+      verdict = 'yellow';
+      console.log(`  📋 Gemini found evidence for lower score (${tiebreakerResult.winner}). Flagging for review.`);
     } else {
-      // Dissenter could not prove it — use the higher score
-      finalScore = Math.max(claudeResult.overall_score, gptResult.overall_score);
+      // Clear answer — use Gemini's score
       verdict = scoreToVerdict(finalScore);
-      console.log(`  ✅ Dissenter conceded. Using higher score: ${finalScore} → ${verdict}`);
+      console.log(`  ✅ Gemini resolved: ${finalScore} → ${verdict} (winner: ${tiebreakerResult.winner})`);
     }
 
     // Save prompt improvement rule

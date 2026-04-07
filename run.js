@@ -17,15 +17,15 @@ function checkEnv() {
     console.error('   Get it at: https://console.anthropic.com/settings/keys\n');
     process.exit(1);
   }
-  if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.trim().length < 10) {
-    console.log('  ℹ️  OPENAI_API_KEY not set — Judge B will use Claude skeptic mode\n');
+  if (!process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY.trim().length < 10) {
+    console.log('  ℹ️  OPENROUTER_API_KEY not set — Judge B will use Claude skeptic mode, tiebreaker will use Claude\n');
   }
 }
 
 function printStatus() {
   const keys = {
     'ANTHROPIC_API_KEY': process.env.ANTHROPIC_API_KEY,
-    'OPENAI_API_KEY': process.env.OPENAI_API_KEY,
+    'OPENROUTER_API_KEY': process.env.OPENROUTER_API_KEY,
     'PROSHOT_API_KEY': process.env.PROSHOT_API_KEY,
     'AIRTABLE_TOKEN': process.env.AIRTABLE_TOKEN,
     'AIRTABLE_BASE_ID': process.env.AIRTABLE_BASE_ID,

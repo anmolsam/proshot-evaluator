@@ -5,32 +5,92 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 
-// ── Discovered via reverse-engineering app.proshort.ai JS bundles ──────────
-// Real backend: https://backend.proshort.ai/enterprise-api/...
-// Auth note: Proshot uses Firebase Auth internally; the ps_ key is passed
-// as Authorization: Bearer. The /meetings/view/meeting endpoint is publicly
-// reachable but requires the key to match the meeting owner's account.
-// If the key doesn't own the meeting → view_status: UNAUTHORISED
-// ──────────────────────────────────────────────────────────────────────────
+// ── Auth Strategy (in priority order) ────────────────────────────────────────
+//
+// Option A: PROSHOT_ENTERPRISE_KEY works on recording-hub (ask Proshot to enable)
+//   → set PROSHOT_API_KEY=ps__... (already works for enterprise-api endpoints)
+//
+// Option B: Firebase Refresh Token (auto-renews, no browser DevTools needed)
+//   → set FIREBASE_REFRESH_TOKEN=... and FIREBASE_API_KEY=AIza...
+//   → this file auto-exchanges it for a fresh ID token before each request
+//
+// Option C: Short-lived Firebase JWT pasted manually (current fallback)
+//   → set PROSHOT_API_KEY=eyJ... (expires ~1 hour)
+//
+// ─────────────────────────────────────────────────────────────────────────────
 
-const API_KEY = process.env.PROSHOT_API_KEY;
 const BACKEND = 'https://backend.proshort.ai';
+const FIREBASE_TOKEN_URL = 'https://securetoken.googleapis.com/v1/token';
 
-const AUTH_STYLES = (key) => [
-  { Authorization: `Bearer ${key}` },
-  { Authorization: key },
-  { 'x-api-key': key },
-  { 'X-Proshort-Api-Key': key },
-];
+// In-memory token cache so we don't refresh on every request
+let _cachedToken = null;
+let _tokenExpiry = 0;
+
+async function getAuthToken() {
+  // Option B: Firebase refresh token — auto-renews every ~55 minutes
+  const refreshToken = process.env.FIREBASE_REFRESH_TOKEN;
+  const firebaseApiKey = process.env.FIREBASE_API_KEY;
+
+  if (refreshToken && firebaseApiKey) {
+    // Return cached token if still valid (with 60s buffer)
+    if (_cachedToken && Date.now() < _tokenExpiry - 60_000) {
+      return _cachedToken;
+    }
+
+    try {
+      const res = await fetch(
+        `${FIREBASE_TOKEN_URL}?key=${firebaseApiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`,
+          timeout: 10000,
+        }
+      );
+
+      const data = await res.json();
+      if (!res.ok || !data.id_token) {
+        throw new Error(`Firebase token refresh failed: ${JSON.stringify(data).slice(0, 200)}`);
+      }
+
+      _cachedToken = data.id_token;
+      _tokenExpiry = Date.now() + (Number(data.expires_in) || 3600) * 1000;
+
+      // Persist new refresh token if rotated
+      if (data.refresh_token && data.refresh_token !== refreshToken) {
+        process.env.FIREBASE_REFRESH_TOKEN = data.refresh_token;
+        console.log('  🔄 Firebase refresh token rotated — update FIREBASE_REFRESH_TOKEN in .env');
+      }
+
+      console.log('  🔑 Firebase token refreshed (valid ~1h)');
+      return _cachedToken;
+    } catch (err) {
+      console.warn(`  ⚠️  Firebase refresh failed: ${err.message} — falling back to PROSHOT_API_KEY`);
+    }
+  }
+
+  // Option A or C: use PROSHOT_API_KEY directly (enterprise key or pasted JWT)
+  const key = process.env.PROSHOT_API_KEY;
+  if (!key || key.includes('PASTE_YOUR')) {
+    throw new Error(
+      'No valid auth configured.\n\n' +
+      'Ask Proshot for ONE of:\n' +
+      '  A) Grant ps_... key access to /recording-hub endpoints\n' +
+      '  B) Provide FIREBASE_REFRESH_TOKEN + FIREBASE_API_KEY\n' +
+      '  C) Provide a webhook that pushes meetings to our /webhook endpoint\n\n' +
+      'Or grab a short-lived JWT from DevTools and set PROSHOT_API_KEY=eyJ...'
+    );
+  }
+  return key;
+}
 
 async function tryFetch(url, headers) {
   try {
-    const res = await fetch(url, { headers, timeout: 10000 });
+    const res = await fetch(url, { headers, timeout: 15000 });
     const text = await res.text();
     if (res.ok) {
       try {
         const data = JSON.parse(text);
-        // Proshot returns 200 with view_status: UNAUTHORISED for public share links
         if (data.view_status === 'UNAUTHORISED') {
           return { ok: false, error: 'UNAUTHORISED — meeting not owned by this API key', status: 403 };
         }
@@ -46,57 +106,50 @@ async function tryFetch(url, headers) {
 }
 
 async function fetchMeeting(meetingId) {
-  if (!API_KEY || API_KEY.includes('PASTE_YOUR')) {
-    throw new Error('PROSHOT_API_KEY not configured in .env');
-  }
-
   console.log(`\n📡 Fetching meeting ${meetingId} from Proshot...`);
 
-  // Primary: recording-hub (discovered from browser DevTools — requires Firebase JWT)
+  const token = await getAuthToken();
+  const authHeader = { Authorization: `Bearer ${token}` };
+
+  // Primary: recording-hub (requires Firebase JWT or enterprise key with recording access)
   const recordingHubUrl = `${BACKEND}/recording-hub/v1/recording/${meetingId}`;
-  for (const authHeaders of AUTH_STYLES(API_KEY)) {
-    const authLabel = Object.keys(authHeaders)[0];
-    process.stdout.write(`  Trying recording-hub [${authLabel}]... `);
-    const result = await tryFetch(recordingHubUrl, authHeaders);
-    if (result.ok) {
-      console.log(`✅ SUCCESS`);
-      // Also fetch transcript from snippet API
-      const transcript = await fetchTranscriptFromSnippet(meetingId, result.data, authHeaders);
-      if (transcript) result.data._transcript = transcript;
-      return normalizeMeeting(result.data, meetingId);
-    }
-    console.log(`❌ ${result.status} — ${result.error}`);
+  process.stdout.write(`  Trying recording-hub... `);
+  const result = await tryFetch(recordingHubUrl, authHeader);
+
+  if (result.ok) {
+    console.log('✅ SUCCESS');
+    const transcript = await fetchTranscriptFromSnippet(meetingId, result.data, authHeader);
+    if (transcript) result.data._transcript = transcript;
+    return normalizeMeeting(result.data, meetingId);
   }
 
-  // Fallback: enterprise-api view endpoint
+  console.log(`❌ ${result.status} — ${result.error}`);
+
+  // Fallback: enterprise-api view endpoint (works with ps_ key)
   const enterpriseUrl = `${BACKEND}/enterprise-api/meetings/view/meeting?document_id=${meetingId}`;
-  for (const authHeaders of AUTH_STYLES(API_KEY)) {
-    const result = await tryFetch(enterpriseUrl, authHeaders);
-    if (result.ok) {
-      console.log(`✅ SUCCESS via enterprise-api`);
-      return normalizeMeeting(result.data, meetingId);
-    }
+  process.stdout.write(`  Trying enterprise-api... `);
+  const fallback = await tryFetch(enterpriseUrl, authHeader);
+
+  if (fallback.ok) {
+    console.log('✅ SUCCESS via enterprise-api');
+    return normalizeMeeting(fallback.data, meetingId);
   }
+
+  console.log(`❌ ${fallback.status} — ${fallback.error}`);
 
   throw new Error(
-    `Could not fetch meeting ${meetingId}.\n` +
-    `  Proshot requires a Firebase JWT — the ps_ key alone won't work.\n` +
-    `  \n` +
-    `  To get a Firebase token:\n` +
-    `    1. Open app.proshort.ai and go to any meeting\n` +
-    `    2. DevTools → Network → filter backend.proshort.ai\n` +
-    `    3. Copy the Authorization: Bearer eyJ... header\n` +
-    `    4. Set PROSHOT_API_KEY=<that token> in .env\n` +
-    `  \n` +
-    `  Or use --file with a saved JSON:\n` +
-    `    node run.js --file data/<meeting-id>.json`
+    `Could not fetch meeting ${meetingId}.\n\n` +
+    `Auth configured: ${token.startsWith('eyJ') ? 'Firebase JWT' : 'Enterprise key (ps_)'}\n\n` +
+    `If using ps_ key: ask Proshot to grant it access to /recording-hub endpoints.\n` +
+    `If JWT expired: grab a new one from DevTools or set FIREBASE_REFRESH_TOKEN.\n\n` +
+    `Quick fix: set PROSHOT_API_KEY=<fresh eyJ... from DevTools>`
   );
 }
 
 async function fetchTranscriptFromSnippet(meetingId, recordingData, authHeaders) {
   try {
-    // Extract customer_id from recording data
-    const customerId = recordingData.customer_id ||
+    const customerId =
+      recordingData.customer_id ||
       (recordingData.thumbnail_url || '').match(/ps_videos\/sales_copilot\/([^/]+)\//)?.[1];
     if (!customerId) return null;
 
@@ -104,7 +157,7 @@ async function fetchTranscriptFromSnippet(meetingId, recordingData, authHeaders)
       method: 'POST',
       headers: { ...authHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({ document_id: meetingId, customer_id: customerId }),
-      timeout: 10000,
+      timeout: 15000,
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -127,15 +180,12 @@ async function fetchTranscriptFromSnippet(meetingId, recordingData, authHeaders)
 }
 
 async function fetchAllMeetings(days = 7) {
-  if (!API_KEY || API_KEY.includes('PASTE_YOUR')) {
-    throw new Error('PROSHOT_API_KEY not configured in .env');
-  }
-
   console.log(`\n📡 Fetching meetings (last ${days} days) from Proshot...`);
 
+  const token = await getAuthToken();
+  const authHeader = { Authorization: `Bearer ${token}` };
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  // Known list endpoints from JS bundle analysis
   const listUrls = [
     `${BACKEND}/enterprise-api/recent_activity/overview`,
     `${BACKEND}/enterprise-api/v1/calendar/synced_meeting`,
@@ -143,15 +193,13 @@ async function fetchAllMeetings(days = 7) {
   ];
 
   for (const url of listUrls) {
-    for (const authHeaders of AUTH_STYLES(API_KEY)) {
-      const result = await tryFetch(url, authHeaders);
-      if (result.ok) {
-        console.log(`✅ Got meeting list from ${url}`);
-        const meetings = extractMeetingsList(result.data);
-        return meetings
-          .filter(m => !cutoff || new Date(m.date || m.created_at || 0) >= new Date(cutoff))
-          .map(m => normalizeMeeting(m, m.document_id || m.id || m.meeting_id));
-      }
+    const result = await tryFetch(url, authHeader);
+    if (result.ok) {
+      console.log(`✅ Got meeting list from ${url}`);
+      const meetings = extractMeetingsList(result.data);
+      return meetings
+        .filter(m => !cutoff || new Date(m.date || m.created_at || 0) >= new Date(cutoff))
+        .map(m => normalizeMeeting(m, m.document_id || m.id || m.meeting_id));
     }
   }
 
@@ -161,8 +209,10 @@ async function fetchAllMeetings(days = 7) {
 }
 
 async function discoverWorkingEndpoint() {
-  console.log('🔍 Probing Proshot API endpoints...');
-  console.log('   Backend discovered from JS bundle: backend.proshort.ai/enterprise-api/\n');
+  console.log('🔍 Probing Proshot API endpoints...\n');
+
+  const token = await getAuthToken();
+  const authHeader = { Authorization: `Bearer ${token}` };
 
   const testUrls = [
     `${BACKEND}/enterprise-api/meetings/view/meeting?document_id=test`,
@@ -170,31 +220,56 @@ async function discoverWorkingEndpoint() {
     `${BACKEND}/enterprise-api/v1/calendar/synced_meeting`,
     `${BACKEND}/enterprise-api/members`,
     `${BACKEND}/enterprise-api/profiles/videos/posted`,
+    `${BACKEND}/recording-hub/v1/recording/test`,
   ];
 
   let found = null;
   for (const url of testUrls) {
-    for (const authHeaders of AUTH_STYLES(API_KEY)) {
-      const authLabel = Object.keys(authHeaders)[0];
-      process.stdout.write(`  ${url} [${authLabel}]... `);
-      const result = await tryFetch(url, authHeaders);
-      const status = result.status === 0 ? 'ERR' : result.status;
-      if (result.ok) {
-        console.log(`✅ 200 — keys: ${Object.keys(result.data).join(', ')}`);
-        if (!found) found = { url, headers: authHeaders, data: result.data };
-      } else {
-        console.log(`❌ ${status}`);
-      }
+    process.stdout.write(`  ${url}... `);
+    const result = await tryFetch(url, authHeader);
+    const status = result.status === 0 ? 'ERR' : result.status;
+    if (result.ok) {
+      console.log(`✅ 200 — keys: ${Object.keys(result.data).join(', ')}`);
+      if (!found) found = { url, data: result.data };
+    } else {
+      console.log(`❌ ${status}`);
     }
   }
 
   if (!found) {
     console.log('\n⚠️  No fully accessible endpoint found.');
-    console.log('   The ps_ API key authenticates but Proshot uses Firebase session auth.');
-    console.log('   Meetings are accessible only if owned by the key\'s Firebase account.');
-    console.log('   Use --file to load meeting JSON files exported from Proshot.');
+    console.log('   Ask Proshot to either:');
+    console.log('   A) Grant your ps_... key access to /recording-hub endpoints');
+    console.log('   B) Provide FIREBASE_REFRESH_TOKEN + FIREBASE_API_KEY');
   }
   return found;
+}
+
+// ── Webhook handler (Option C) ────────────────────────────────────────────────
+// Proshot POSTs to our /webhook/proshot endpoint when a meeting is processed.
+// Call this from server.js to register the route.
+function createWebhookHandler(evaluateFn, logFn) {
+  return async (req, res) => {
+    try {
+      const payload = req.body;
+      const meetingId = payload.meeting_id || payload.document_id || payload.id;
+
+      if (!meetingId) {
+        return res.status(400).json({ error: 'Missing meeting_id in webhook payload' });
+      }
+
+      console.log(`\n📨 Webhook received for meeting ${meetingId}`);
+      res.status(200).json({ received: true, meetingId });
+
+      // Process async — don't block the webhook response
+      const meeting = normalizeMeeting(payload, meetingId);
+      const result = await evaluateFn(meeting);
+      await logFn(result);
+      console.log(`  ✅ Webhook evaluation complete: ${result.finalScore} → ${result.verdict}`);
+    } catch (err) {
+      console.error(`  ❌ Webhook handler error: ${err.message}`);
+    }
+  };
 }
 
 function extractMeetingsList(data) {
@@ -208,7 +283,6 @@ function extractMeetingsList(data) {
 }
 
 function normalizeMeeting(raw, id) {
-  // recording-hub shape uses _transcript injected by fetchTranscriptFromSnippet
   const transcript = raw._transcript || extractTranscript(raw);
   return {
     id: id || raw.document_id || raw.id || raw.meeting_id || 'unknown',
@@ -224,13 +298,8 @@ function normalizeMeeting(raw, id) {
 
 function extractTranscript(raw) {
   const candidates = [
-    raw.transcript,
-    raw.transcription,
-    raw.full_transcript,
-    raw.raw_transcript,
-    raw.call_transcript,
-    raw.meeting_transcript,
-    raw.content,
+    raw.transcript, raw.transcription, raw.full_transcript,
+    raw.raw_transcript, raw.call_transcript, raw.meeting_transcript, raw.content,
   ];
 
   for (const c of candidates) {
@@ -245,14 +314,12 @@ function extractTranscript(raw) {
     }
   }
 
-  return raw.transcript || '[No transcript available — load from file with --file path/to/meeting.json]';
+  return '[No transcript available]';
 }
 
 function extractProshortOutput(raw) {
-  // recording-hub shape: overview (markdown), crm_notes_synced, call_sentiment, deal_probability
   if (raw.overview) {
     const overview = raw.overview;
-    // Parse action items from markdown bullets under "Action Items" section
     const actionSection = overview.match(/Action Items\*\*([\s\S]*?)(?:\*\*:|$)/)?.[1] || '';
     const actionItems = actionSection
       .split('\n')
@@ -283,7 +350,6 @@ function extractProshortOutput(raw) {
     };
   }
 
-  // Fallback: nested meeting_details shape (from enterprise-api view endpoint)
   const details = raw.meeting_details || raw;
   return {
     summary: details.summary || details.ai_summary || details.meeting_summary ||
@@ -311,14 +377,9 @@ function extractSection(markdown, sectionName) {
 function loadMeetingFromFile(filePath) {
   const resolved = path.resolve(filePath);
   console.log(`\n📂 Loading meeting from file: ${resolved}`);
-
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`File not found: ${resolved}`);
-  }
-
+  if (!fs.existsSync(resolved)) throw new Error(`File not found: ${resolved}`);
   const raw = JSON.parse(fs.readFileSync(resolved, 'utf-8'));
-  const id = raw.id || raw.meetingId || raw.document_id ||
-             path.basename(filePath, '.json');
+  const id = raw.id || raw.meetingId || raw.document_id || path.basename(filePath, '.json');
   return normalizeMeeting(raw, id);
 }
 
@@ -327,4 +388,6 @@ module.exports = {
   fetchAllMeetings,
   loadMeetingFromFile,
   discoverWorkingEndpoint,
+  createWebhookHandler,
+  getAuthToken,
 };

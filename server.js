@@ -3,7 +3,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const { fetchMeeting, fetchAllMeetings } = require('./src/proshot');
+const { fetchMeeting, fetchAllMeetings, createWebhookHandler } = require('./src/proshot');
 const { evaluateMeeting } = require('./src/evaluator');
 const { logEvaluation, updateHumanDecision, fetchAllEvaluations, getStats } = require('./src/airtable');
 const { loadRules } = require('./src/rules');
@@ -73,6 +73,15 @@ app.get('/api/evaluations', async (req, res) => {
 app.get('/api/rules', (req, res) => {
   const rules = loadRules();
   res.json({ rules });
+});
+
+// POST /webhook/proshot — Proshot pushes here when a meeting is processed (Option C)
+// Ask Proshot to register: https://your-domain.com/webhook/proshot
+app.post('/webhook/proshot', createWebhookHandler(evaluateMeeting, logEvaluation));
+
+// GET /webhook/proshot — health check so Proshot can verify the endpoint
+app.get('/webhook/proshot', (req, res) => {
+  res.json({ status: 'ok', service: 'proshot-evaluator', ready: true });
 });
 
 // GET /api/stats — aggregate stats

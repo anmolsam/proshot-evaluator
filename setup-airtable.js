@@ -143,23 +143,74 @@ async function main() {
       { name: 'Human Decision', type: 'singleLineText' },
       { name: 'Prompt Rule Generated', type: 'multilineText' },
       { name: 'Timestamp', type: 'dateTime', options: { dateFormat: { name: 'iso' }, timeFormat: { name: '24hour' }, timeZone: 'utc' } },
-      // ── BANT Qualification Fields ──────────────────────────────────────
-      { name: 'BANT Status', type: 'singleSelect', options: { choices: [
-        { name: 'qualified', color: 'greenBright' },
-        { name: 'needs_review', color: 'yellowBright' },
-        { name: 'disqualified', color: 'redBright' },
+      // ══ SECTION 1: TECH ELIGIBILITY ══════════════════════════════════════
+      { name: 'Tech: Is trade/service supported by Beam AI?', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' },
       ]}},
+      { name: 'Tech: Does required TAT align with Beam AI delivery?', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' }, { name: 'Unknown', color: 'grayBright' },
+      ]}},
+      { name: 'Tech: If DQ — Proof Attached?', type: 'singleSelect', options: { choices: [
+        { name: 'Proshot', color: 'blueBright' }, { name: 'Written Proof', color: 'purpleBright' }, { name: 'N/A', color: 'grayBright' },
+      ]}},
+      { name: 'Tech Eligible', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No — Technical DQ', color: 'redBright' }, { name: 'Unknown', color: 'grayBright' },
+      ]}},
+      // ══ SECTION 2: BANT (3/4 REQUIRED) ══════════════════════════════════
+      { name: 'B: Prospect confirmed ability to invest? (DFY $10K / DIY $7K + licensing)', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' }, { name: 'Unknown', color: 'grayBright' },
+      ]}},
+      { name: 'A: Decision Criteria identified?', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' }, { name: 'Unknown', color: 'grayBright' },
+      ]}},
+      { name: 'A: Internal approval steps mapped? (procurement/legal)', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' }, { name: 'Unknown', color: 'grayBright' },
+      ]}},
+      { name: 'N: Customer willing to offload end-to-end to AI? (Mandatory)', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' }, { name: 'Unknown', color: 'grayBright' },
+      ]}},
+      { name: 'T: Can deal close within 90 days?', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' }, { name: 'Unknown', color: 'grayBright' },
+      ]}},
+      { name: 'T: If >90 days — deal size > $50K?', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' }, { name: 'N/A', color: 'grayBright' },
+      ]}},
+      // ══ SECTION 3: DEAL CONTROL (derived) ════════════════════════════════
       { name: 'BANT Score', type: 'singleLineText' },
-      { name: 'Q1 Trade Supported', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
-      { name: 'Q2 TAT Aligned', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
-      { name: 'Q3 Budget Confirmed', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
-      { name: 'Q4 Decision Criteria', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
-      { name: 'Q5 Approval Steps Mapped', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
-      { name: 'Q6 Need End to End', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
-      { name: 'Q7 Close Within 90 Days', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
-      { name: 'Q8 Deal Over 50K If Long', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }, { name: 'n/a', color: 'blueBright' }] } },
-      { name: 'Tech Qualified', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
-      { name: 'Proshot Captured BANT', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'partial', color: 'yellowBright' }, { name: 'no', color: 'redBright' }] } },
+      { name: 'Qualified Deal (Tech Eligible + 3/4 BANT)', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' }, { name: 'Needs Review', color: 'yellowBright' },
+      ]}},
+      { name: 'Pilot Allowed (Qualified Deal only)', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' },
+      ]}},
+      { name: 'Sales Cycle Started (at 3/4 BANT)', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' },
+      ]}},
+      { name: 'Forecast Allowed (Qualified Deal only)', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' },
+      ]}},
+      // ══ SECTION 4: CLOSED LOST ════════════════════════════════════════════
+      { name: 'CL Reason', type: 'singleSelect', options: { choices: [
+        { name: 'TAT Delays', color: 'redBright' },
+        { name: 'Accuracy Limits', color: 'redBright' },
+        { name: 'Scope Limitations', color: 'redBright' },
+        { name: 'Custom Excel Needs', color: 'redBright' },
+        { name: 'Integration Limitation', color: 'redBright' },
+        { name: 'Budget', color: 'orangeBright' },
+        { name: 'Authority', color: 'orangeBright' },
+        { name: 'Need', color: 'orangeBright' },
+        { name: 'Timeline', color: 'orangeBright' },
+        { name: 'Other', color: 'grayBright' },
+      ]}},
+      { name: 'CL Other Reason', type: 'singleLineText' },
+      { name: 'CL Slack Notified (TL / BU / Pushpita / Sushovan)', type: 'checkbox', options: { color: 'orangeBright', icon: 'check' } },
+      { name: 'N+T+$300 Qualified', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'No', color: 'redBright' }, { name: 'Unknown', color: 'grayBright' },
+      ]}},
+      // ══ META ══════════════════════════════════════════════════════════════
+      { name: 'Proshot Captured BANT?', type: 'singleSelect', options: { choices: [
+        { name: 'Yes', color: 'greenBright' }, { name: 'Partial', color: 'yellowBright' }, { name: 'No', color: 'redBright' },
+      ]}},
       { name: 'BANT Evidence', type: 'multilineText' },
       { name: 'Recommended Next Action', type: 'multilineText' },
     ].filter(f => !existingFields.includes(f.name));

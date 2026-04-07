@@ -6,61 +6,126 @@ const { parseJsonSafely } = require('./utils');
 
 const anthropic = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── Beam AI BANT Qualification Framework ─────────────────────────────────────
-// 3 of 4 BANT required for a Qualified Deal
-// Any "No" on Tech Eligibility = Technical DQ (hard block)
+// ── Beam AI Simplified BANT Qualification Framework ───────────────────────────
+// Exact framework as specified:
+//
+// SECTION 1 — TECH ELIGIBILITY (Any "No" = Technical DQ)
+//   Q1: Is the trade/service supported by Beam AI?               Yes / No
+//   Q2: Does the required TAT align with Beam AI delivery?        Yes / No
+//   Q_DQ: If Technical DQ, proof attached?                        Proshot / Written proof
+//
+// SECTION 2 — BANT QUALIFICATION (3/4 REQUIRED)
+//   B:  Has the prospect confirmed ability to invest?             Yes / No / Unknown
+//       (DFY: $10K & DIY: $7K) and agreed to licensing model?
+//   A1: Has the Decision Criteria been identified?                Yes / No / Unknown
+//   A2: Are all internal approval steps clearly mapped?           Yes / No / Unknown
+//       (procurement/legal if needed)
+//   N:  Is the customer willing to offload end-to-end             Yes (Mandatory)
+//       takeoffs to AI?
+//   T1: Can the deal close within 90 days?                        Yes / No
+//   T2: If longer than 90 days, is the deal size > $50K?          Yes / No
+//
+// SECTION 3 — DEAL CONTROL (derived)
+//   Qualified Deal   → Tech Eligible + 3/4 BANT
+//   Pilot Allowed    → Qualified Deal only
+//   Sales Cycle Start → At 3/4 BANT
+//   Forecast Allowed → Qualified Deal only
+//
+// SECTION 4 — CLOSED LOST
+//   CL Reason: TAT delays / Accuracy limits / Scope limitations /
+//              Custom Excel needs / Integration limitation /
+//              Budget / Authority / Need / Timeline / Other
+//   Slack notification to CL channel if CL reason is B/A/N/T/Other
+//   Any other reason = qualification review
+//   N + T + $300 payment = qualified
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BANT_PROMPT = `You are a senior sales qualification analyst for Beam AI, an AI-powered construction takeoff platform.
+const BANT_PROMPT = `You are a sales qualification analyst for Beam AI, an AI-powered construction takeoff platform.
 
-You will receive a raw meeting transcript. Your job is to evaluate it against Beam AI's BANT qualification framework and answer each question STRICTLY from transcript evidence only.
+You will receive a meeting transcript. Answer ONLY from explicit transcript evidence. Do not infer or assume.
 
 Rules:
-- Answer "yes", "no", or "unknown" based solely on what is said in the transcript
-- "unknown" = topic was not discussed or not enough information to determine
-- Quote the exact transcript line as evidence for every "yes" or "no" answer
-- Be strict: do not infer what was "probably" meant — only what was explicitly stated
-- For the overall qualification, apply the logic: Tech Eligible + 3/4 BANT = Qualified
+- "yes" = explicitly confirmed in transcript (quote it)
+- "no" = explicitly denied or contradicted in transcript (quote it)
+- "unknown" = not discussed at all, or insufficient information
+- "n/a" = question is not applicable given prior answers
+- Never fabricate evidence. If not in the transcript, answer "unknown"
 
-The BANT framework:
+EXACT QUESTIONS TO ANSWER:
 
-SECTION 1 — TECH ELIGIBILITY (any "no" = Technical DQ)
-Q1: Is the trade/service the prospect needs supported by Beam AI? (electrical, mechanical, plumbing, civil etc.)
-Q2: Does the prospect's required turnaround time (TAT) align with Beam AI's delivery speed?
+SECTION 1 — TECH ELIGIBILITY
+Q1: Is the trade/service supported by Beam AI?
+  Valid answers: yes / no
+  (Supported trades include electrical, mechanical, plumbing, civil, structural)
 
-SECTION 2 — BANT
+Q2: Does the required TAT (turnaround time) align with Beam AI delivery?
+  Valid answers: yes / no / unknown
+
+Q_DQ: If Technical DQ (Q1=no or Q2=no), what proof is attached?
+  Valid answers: proshot / written_proof / n/a
+  (n/a if not technically disqualified)
+
+SECTION 2 — BANT (3 out of 4 required)
+
 B — Budget
-Q3: Has the prospect confirmed ability or willingness to invest in Beam AI? (Pricing: DFY $10K/yr, DIY $7K/yr, licensing model)
+QB: Has the prospect confirmed ability to invest in Beam AI? (DFY: $10K & DIY: $7K) and has agreed to the licensing model?
+  Valid answers: yes / no / unknown
 
 A — Authority
-Q4: Has the decision criteria been identified? (what does success look like for them to say yes?)
-Q5: Are all internal approval steps clearly mapped? (who else needs to sign off, procurement/legal process)
+QA1: Has the Decision Criteria been identified?
+  Valid answers: yes / no / unknown
+
+QA2: Are all internal approval steps (procurement/legal if needed) clearly mapped?
+  Valid answers: yes / no / unknown
 
 N — Need
-Q6: Is the prospect willing to offload end-to-end takeoffs to AI? (This is MANDATORY — partial use is not enough)
+QN: Is the customer willing to offload end-to-end takeoffs to AI? (Mandatory — partial use does not qualify)
+  Valid answers: yes / no / unknown
 
 T — Timeline
-Q7: Can the deal realistically close within 90 days?
-Q8: If timeline is longer than 90 days, is the deal size likely >$50K?
+QT1: Can the deal close within 90 days?
+  Valid answers: yes / no / unknown
 
-SECTION 3 — DERIVED
-Q9: Is the prospect technically qualified? (yes = Q1 and Q2 both "yes", no = either is "no")
-Q10: What is the overall BANT qualification status? (qualified = tech eligible + 3 or more of B/A(both parts)/N/T; disqualified = tech DQ or <3 BANT; needs_review = unknown on critical fields)
+QT2: If longer than 90 days, is the deal size > $50K?
+  Valid answers: yes / no / n/a
+  (n/a if QT1 = yes)
 
-Respond ONLY in this exact JSON format, no preamble, no markdown:
+SECTION 3 — DEAL CONTROL (you derive these from the above)
+Derive each using these exact rules:
+- tech_eligible: yes if Q1=yes AND Q2=yes; no if Q1=no OR Q2=no; unknown otherwise
+- bant_score: count how many of B / A(QA1 AND QA2) / N / T(QT1 OR QT2) are "yes" — format as "X/4"
+- qualified_deal: yes if tech_eligible=yes AND bant_score >= 3/4; no if tech_eligible=no; needs_review otherwise
+- pilot_allowed: yes only if qualified_deal=yes; no otherwise
+- sales_cycle_start: yes if bant_score >= 3/4; no otherwise
+- forecast_allowed: yes only if qualified_deal=yes; no otherwise
+
+SECTION 4 — CLOSED LOST
+nt_300_qualified: yes if QN=yes AND QT1=yes AND transcript mentions a $300 payment or deposit; no otherwise; unknown if N or T unknown
+
+Proshot comparison:
+proshot_captured_bant: did Proshot's output capture any of these BANT signals?
+  Valid answers: yes / partial / no
+
+Respond ONLY in this exact JSON, no preamble, no markdown:
 {
-  "q1_trade_supported": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief explanation" },
-  "q2_tat_aligned": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief explanation" },
-  "q3_budget_confirmed": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief explanation" },
-  "q4_decision_criteria": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief explanation" },
-  "q5_approval_steps_mapped": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief explanation" },
-  "q6_need_end_to_end": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief explanation" },
-  "q7_close_within_90_days": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief explanation" },
-  "q8_deal_size_over_50k_if_long": { "answer": "yes|no|n/a", "evidence": "exact quote or null", "notes": "brief explanation" },
-  "q9_tech_qualified": { "answer": "yes|no|unknown", "evidence": null, "notes": "derived from Q1+Q2" },
-  "q10_bant_status": { "answer": "qualified|disqualified|needs_review", "evidence": null, "notes": "explain which BANT criteria passed/failed and why", "bant_score": "X/4" },
-  "proshot_captured_bant": { "answer": "yes|partial|no", "evidence": "what BANT signals Proshot's output did or did not capture", "notes": "compare Claude findings vs Proshot output" },
-  "recommended_next_action": "string — what the sales rep should do next based on this qualification"
+  "q1_trade_supported": { "answer": "yes|no", "evidence": "exact quote or null", "notes": "brief" },
+  "q2_tat_aligned": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief" },
+  "q_dq_proof": { "answer": "proshot|written_proof|n/a", "evidence": null, "notes": "brief" },
+  "qb_budget_confirmed": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief" },
+  "qa1_decision_criteria": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief" },
+  "qa2_approval_steps_mapped": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief" },
+  "qn_end_to_end_offload": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief" },
+  "qt1_close_within_90_days": { "answer": "yes|no|unknown", "evidence": "exact quote or null", "notes": "brief" },
+  "qt2_deal_over_50k_if_long": { "answer": "yes|no|n/a", "evidence": "exact quote or null", "notes": "brief" },
+  "tech_eligible": "yes|no|unknown",
+  "bant_score": "X/4",
+  "qualified_deal": "yes|no|needs_review",
+  "pilot_allowed": "yes|no",
+  "sales_cycle_start": "yes|no",
+  "forecast_allowed": "yes|no",
+  "nt_300_qualified": "yes|no|unknown",
+  "proshot_captured_bant": { "answer": "yes|partial|no", "notes": "what Proshot did/did not capture vs the 9 BANT questions above" },
+  "recommended_next_action": "what the rep must do next based strictly on the qualification gaps above"
 }`;
 
 async function runBantEvaluation(transcript, proshortOutput) {
@@ -70,7 +135,7 @@ async function runBantEvaluation(transcript, proshortOutput) {
 
 ${transcript}
 
-## Proshot AI Output (for comparison)
+## Proshot AI Output (for comparison only)
 
 **Summary:**
 ${proshortOutput.summary || '(none)'}
@@ -97,7 +162,7 @@ ${JSON.stringify(proshortOutput.crmFields || {}, null, 2)}`;
       if (!textBlock) throw new Error('No text block in BANT response');
 
       const result = parseJsonSafely(textBlock.text);
-      console.log(`  ✅ BANT status: ${result.q10_bant_status?.answer} (${result.q10_bant_status?.bant_score})`);
+      console.log(`  ✅ BANT: tech=${result.tech_eligible} | score=${result.bant_score} | qualified=${result.qualified_deal}`);
       return result;
     } catch (err) {
       lastErr = err;

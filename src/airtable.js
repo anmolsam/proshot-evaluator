@@ -63,7 +63,11 @@ async function logEvaluation(evalResult) {
       ...buildBantFields(evalResult.bantResult),
     };
 
-    const result = await airtableRequest('POST', TABLE, { fields });
+    // Strip null/undefined values — Airtable rejects null for singleSelect fields
+    const cleanFields = Object.fromEntries(
+      Object.entries(fields).filter(([, v]) => v !== null && v !== undefined)
+    );
+    const result = await airtableRequest('POST', TABLE, { fields: cleanFields });
     console.log(`  ✅ Logged to Airtable: record ${result.id}`);
     return result.id;
   } catch (err) {
@@ -153,27 +157,84 @@ async function getStats() {
 
 function buildBantFields(bant) {
   if (!bant) return {};
-  const a = (q) => (bant[q]?.answer || 'unknown').toLowerCase();
-  const evidence = Object.entries(bant)
-    .filter(([k, v]) => k.startsWith('q') && v?.evidence)
-    .map(([k, v]) => `${k}: ${v.evidence}`)
+
+  // Safely extract a string answer — strips any accidental surrounding quotes
+  const ans = (field) => {
+    const raw = bant[field]?.answer ?? bant[field] ?? '';
+    return String(raw).replace(/^["']+|["']+$/g, '').toLowerCase().trim();
+  };
+
+  // Map to exact Airtable choice names — return null for unknown (leaves field blank)
+  const ynu = (field) => {
+    const v = ans(field);
+    if (v === 'yes') return 'Yes';
+    if (v === 'no') return 'No';
+    return 'Unknown';   // 'Unknown' IS a valid choice in every yes/no/unknown field
+  };
+  const ynNa = (field) => {
+    const v = ans(field);
+    if (v === 'yes') return 'Yes';
+    if (v === 'no') return 'No';
+    if (v === 'n/a' || v === 'na') return 'N/A';
+    return null;  // leave blank when truly unknown for N/A-type fields
+  };
+
+  const techEligible = ans('tech_eligible');
+  const qualifiedDeal = ans('qualified_deal');
+  const ntQual = ans('nt_300_qualified');
+  const pcBant = ans('proshot_captured_bant');
+
+  // Build evidence lines
+  const evidence = [
+    ['q1_trade_supported', 'Q1 Trade'],
+    ['q2_tat_aligned', 'Q2 TAT'],
+    ['qb_budget_confirmed', 'B Budget'],
+    ['qa1_decision_criteria', 'A1 Decision Criteria'],
+    ['qa2_approval_steps_mapped', 'A2 Approval Steps'],
+    ['qn_end_to_end_offload', 'N End-to-End'],
+    ['qt1_close_within_90_days', 'T1 90 Days'],
+    ['qt2_deal_over_50k_if_long', 'T2 >$50K'],
+  ].filter(([k]) => bant[k]?.evidence)
+    .map(([k, label]) => `${label}: "${bant[k].evidence}"`)
     .join('\n');
 
   return {
-    'BANT Status': bant.q10_bant_status?.answer || 'needs_review',
-    'BANT Score': bant.q10_bant_status?.bant_score || '',
-    'Q1 Trade Supported': a('q1_trade_supported'),
-    'Q2 TAT Aligned': a('q2_tat_aligned'),
-    'Q3 Budget Confirmed': a('q3_budget_confirmed'),
-    'Q4 Decision Criteria': a('q4_decision_criteria'),
-    'Q5 Approval Steps Mapped': a('q5_approval_steps_mapped'),
-    'Q6 Need End to End': a('q6_need_end_to_end'),
-    'Q7 Close Within 90 Days': a('q7_close_within_90_days'),
-    'Q8 Deal Over 50K If Long': a('q8_deal_size_over_50k_if_long'),
-    'Tech Qualified': a('q9_tech_qualified'),
-    'Proshot Captured BANT': bant.proshot_captured_bant?.answer || 'unknown',
+    // ── Section 1: Tech Eligibility ──
+    'Tech: Is trade/service supported by Beam AI?':
+      ans('q1_trade_supported') === 'yes' ? 'Yes' : 'No',
+    'Tech: Does required TAT align with Beam AI delivery?': ynu('q2_tat_aligned'),
+    'Tech: If DQ — Proof Attached?':
+      ans('q_dq_proof') === 'proshot' ? 'Proshot'
+      : ans('q_dq_proof') === 'written_proof' ? 'Written Proof'
+      : 'N/A',
+    'Tech Eligible':
+      techEligible === 'yes' ? 'Yes'
+      : techEligible === 'no' ? 'No — Technical DQ'
+      : 'Unknown',
+    // ── Section 2: BANT ──
+    'B: Prospect confirmed ability to invest? (DFY $10K / DIY $7K + licensing)': ynu('qb_budget_confirmed'),
+    'A: Decision Criteria identified?': ynu('qa1_decision_criteria'),
+    'A: Internal approval steps mapped? (procurement/legal)': ynu('qa2_approval_steps_mapped'),
+    'N: Customer willing to offload end-to-end to AI? (Mandatory)': ynu('qn_end_to_end_offload'),
+    'T: Can deal close within 90 days?': ynu('qt1_close_within_90_days'),
+    'T: If >90 days — deal size > $50K?': ynNa('qt2_deal_over_50k_if_long'),
+    // ── Section 3: Deal Control ──
+    'BANT Score': String(bant.bant_score || ''),
+    'Qualified Deal (Tech Eligible + 3/4 BANT)':
+      qualifiedDeal === 'yes' ? 'Yes'
+      : qualifiedDeal === 'no' ? 'No'
+      : 'Needs Review',
+    'Pilot Allowed (Qualified Deal only)': qualifiedDeal === 'yes' ? 'Yes' : 'No',
+    'Sales Cycle Started (at 3/4 BANT)': ans('sales_cycle_start') === 'yes' ? 'Yes' : 'No',
+    'Forecast Allowed (Qualified Deal only)': qualifiedDeal === 'yes' ? 'Yes' : 'No',
+    // ── Section 4: Closed Lost ──
+    'N+T+$300 Qualified':
+      ntQual === 'yes' ? 'Yes' : ntQual === 'no' ? 'No' : 'Unknown',
+    // ── Meta ──
+    'Proshot Captured BANT?':
+      pcBant === 'yes' ? 'Yes' : pcBant === 'partial' ? 'Partial' : pcBant === 'no' ? 'No' : 'Partial',
     'BANT Evidence': evidence,
-    'Recommended Next Action': bant.recommended_next_action || '',
+    'Recommended Next Action': String(bant.recommended_next_action || ''),
   };
 }
 

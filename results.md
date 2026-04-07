@@ -246,57 +246,150 @@
 
 ---
 
-## BANT Qualification Analysis
+## Beam AI — Simplified BANT Qualification
 
-> Claude independently analyzed the transcript against Beam AI's BANT framework. This is what actually happened in the call vs. what Proshot captured.
-
-### Section 1 — Tech Eligibility
-
-| # | Question | Claude Answer | Evidence | Proshot Captured? |
-|---|---|---|---|---|
-| Q1 | Is the trade/service supported by Beam AI? | ✅ **YES** | *"in this case we just have electrical. So there we go. All the sheets are for electrical."* | ✅ Yes — product discussion covers electrical |
-| Q2 | Does the required TAT align with Beam AI's delivery? | ❓ **UNKNOWN** | Not discussed at any point in the call | ❌ Not flagged as a gap |
-
-**Tech Qualification: INCOMPLETE** — Q1 confirmed, Q2 never explored.
+> Claude read the transcript and answered every question from the framework below. Evidence = exact transcript quotes only. No inference.
 
 ---
 
-### Section 2 — BANT Questions
+### 1. TECH ELIGIBILITY
+> Any "No" = Technical DQ
 
-| # | Pillar | Question | Claude Answer | Evidence from Transcript | Proshot Captured? |
-|---|---|---|---|---|---|
-| Q3 | **Budget** | Has prospect confirmed ability/willingness to invest? ($7K DIY / $10K DFY) | ❌ **UNKNOWN** | Pricing never discussed | ❌ Not flagged |
-| Q4 | **Authority** | Has decision criteria been identified? | ✅ **YES** | *"I think it's more of just looking at what that overall accuracy level is and seeing if that time saver would be worth it."* — Max Carpenter | ✅ Partially — captured in Decision Process section |
-| Q5 | **Authority** | Are all internal approval steps clearly mapped? | ❌ **NO** | *"I'd say would need at least a week just to do our own internal review against our own output and then review with our larger team."* — process mentioned but no decision-maker, no procurement/legal | ⚠️ Partial — larger team mentioned but chain not mapped |
-| Q6 | **Need** | Is prospect willing to offload end-to-end takeoffs to AI? *(MANDATORY)* | ❓ **UNKNOWN** | Caitlin mentioned using it *"just for those specific types of projects"* — whether they'd accept full AI output vs. use it as a checking tool was never confirmed | ❌ Not flagged |
-| Q7 | **Timeline** | Can deal close within 90 days? | ❓ **UNKNOWN** | No purchase timeline or closing discussion occurred | ❌ Not flagged |
-| Q8 | **Timeline** | If >90 days, is deal size >$50K? | ❓ **N/A** | Deal size never discussed | ❌ Not flagged |
+| Question | Answer | Transcript Evidence | Proshot Flagged? |
+|---|---|---|---|
+| Is the trade/service supported by Beam AI? | ✅ **Yes** | *"in this case we just have electrical. So there we go. All the sheets are for electrical."* — Damini | ✅ Yes |
+| Does the required TAT align with Beam AI delivery? | ❓ **Not discussed** | TAT never mentioned at any point in the call | ❌ No — gap not flagged |
+| If Technical DQ, proof attached? | **N/A** | Not technically DQ — trade is supported | N/A |
+
+**Tech Eligibility result:** Incomplete — Q1 confirmed (electrical supported), TAT never raised. Rep must confirm TAT before Tech Eligible = Yes.
 
 ---
 
-### Section 3 — Qualification Verdict
+### 2. BANT QUALIFICATION (3 / 4 REQUIRED)
 
-| Derived Field | Value | Explanation |
+**B — Budget**
+> Has the prospect confirmed ability to invest in Beam AI? (DFY: $10K & DIY: $7K) and has agreed for the licensing model?
+
+| Answer | Transcript Evidence | Proshot Flagged? |
 |---|---|---|
-| **Tech Qualified** | ⚠️ UNKNOWN | Q1 = Yes (electrical confirmed), Q2 = Unknown (TAT never discussed) |
-| **BANT Score** | **0 / 4** | Budget = ?, Authority = partial (Q4 yes, Q5 no), Need = ?, Timeline = ? |
-| **Overall BANT Status** | 🟡 **NEEDS REVIEW** | Only decision criteria (Q4) was established. Budget, Need (end-to-end), and Timeline were never raised — this was a product demo call, not a discovery call. |
-| **Proshot Captured BANT** | ⚠️ **PARTIAL** | Captured surface signals (pain points, use case, next steps) but did not flag that B, N, and T were entirely absent |
-
-**Key finding:** Proshot synced `deal_probability: MEDIUM` to HubSpot with **0 of 4 BANT criteria** confirmed.
+| ❌ **Unknown** | Pricing was never discussed. No mention of $10K, $7K, or any budget figure anywhere in the call. | ❌ No — Proshot logged deal_probability: MEDIUM with zero budget discussion |
 
 ---
 
-### Recommended Next Action (Claude)
+**A — Authority**
+> Has the Decision Criteria been identified?
 
-> Before or during the April 8 follow-up, the rep must conduct proper discovery:
-> 1. **Budget** — Confirm willingness to invest at Beam AI's price points ($7K/yr DIY · $10K/yr DFY); introduce licensing model
-> 2. **Need (end-to-end)** — Probe explicitly: will they accept AI as the primary takeoff, or just use it as a sanity check? Mandatory criterion
-> 3. **Authority** — Map the full approval chain: who beyond Caitlin and Max needs to approve? Procurement or legal involved?
-> 4. **Timeline** — When would they be ready to make a decision if the accuracy review passes?
-> 5. **TAT** — What turnaround time do they need on jobs? Confirm Beam AI can meet it
->
-> The April 8 call should be structured as discovery + accuracy debrief, not just a check-in.
+| Answer | Transcript Evidence | Proshot Flagged? |
+|---|---|---|
+| ✅ **Yes** | *"I think it's more of just looking at what that overall accuracy level is and seeing if that time saver would be worth it."* — Max Carpenter | ✅ Partial — captured in Decision Process section |
+
+> Are all internal approval steps (procurement/legal if needed) clearly mapped?
+
+| Answer | Transcript Evidence | Proshot Flagged? |
+|---|---|---|
+| ❌ **No** | *"review with our larger team"* — Caitlin mentions a larger team but never identifies who, what their role is, or whether procurement/legal is involved. No decision-maker chain was mapped. | ⚠️ Partial — "larger team" mentioned but chain not mapped |
+
+---
+
+**N — Need**
+> Is the customer willing to offload end-to-end takeoffs to AI? (Mandatory)
+
+| Answer | Transcript Evidence | Proshot Flagged? |
+|---|---|---|
+| ❌ **Unknown** | Caitlin said they'd use it *"just for those specific types of projects"* (complex commercial). Whether they would accept AI as the primary output vs. use it as a checking tool against their own takeoff was never asked or confirmed. This is the mandatory criterion — it was never established. | ❌ No — Proshot did not flag this |
+
+---
+
+**T — Timeline**
+> Can the deal close within 90 days?
+
+| Answer | Transcript Evidence | Proshot Flagged? |
+|---|---|---|
+| ❌ **Unknown** | No closing timeline or purchase intent was discussed. The only date discussed was April 8 for an accuracy review follow-up — not a purchase decision. | ❌ No |
+
+> If longer than 90 days, is the deal size > $50K?
+
+| Answer | Transcript Evidence | Proshot Flagged? |
+|---|---|---|
+| **N/A** | Deal size never discussed. Cannot evaluate. | ❌ No |
+
+---
+
+### 3. DEAL CONTROL
+
+| Rule | Status | Reason |
+|---|---|---|
+| **Qualified Deal** (Tech Eligible + 3/4 BANT) | ❌ **No** | BANT Score: 0/4 — B unknown, A partial, N unknown, T unknown |
+| **Pilot Allowed** (Qualified Deal only) | ❌ **No** | Not a qualified deal |
+| **Sales Cycle Start** (at 3/4 BANT) | ❌ **No** | 0/4 BANT confirmed |
+| **Forecast Allowed** (Qualified Deal only) | ❌ **No** | Not a qualified deal |
+
+**BANT Score: 0/4** — Only decision criteria (A1) was partially established. Budget, Need (end-to-end), and Timeline were never raised. Proshot logged `deal_probability: MEDIUM` to HubSpot with no BANT evidence.
+
+---
+
+### 4. CLOSED LOST (POST 4/4 ONLY)
+
+**Question: Slack notification to CL channel (TL, BU, Pushpita, Sushovan)?**
+
+> Triggered if CL reason is: Budget / Authority / Need / Timeline / Other
+
+| Field | Status | Notes |
+|---|---|---|
+| CL Reason | **N/A** | Deal is not closed lost — in active evaluation phase |
+| CL Other Reason | — | Not applicable |
+| Slack Notification Sent | ❌ **No** | Deal not closed lost — no notification required yet |
+
+If this deal goes Closed Lost, the trigger reasons that require Slack notification to the CL channel (TL, BU, Pushpita, Sushovan) would be:
+- **Budget** — if prospect declines after pricing is presented
+- **Authority** — if decision-maker chain cannot be reached
+- **Need** — if prospect confirms they only want AI as a checking tool, not end-to-end
+- **Timeline** — if deal cannot close in 90 days and deal size <$50K
+- **Other** — rep must specify reason
+
+Any other reason (TAT delays, Accuracy limits, Scope limitations, Custom Excel needs, Integration limitation) = **qualification review**, not Slack notification.
+
+---
+
+**Question: N + T + $300 payment = Qualified**
+
+| Field | Answer | Transcript Evidence |
+|---|---|---|
+| N (Need) confirmed? | ❌ Unknown | End-to-end offload never confirmed |
+| T (Timeline <90 days) confirmed? | ❌ Unknown | Closing timeline never discussed |
+| $300 payment made? | ❌ No | No payment mentioned in transcript |
+| **N+T+$300 Qualified?** | ❌ **No** | All three conditions unmet — N and T not established, no $300 payment |
+
+This path to qualification is not available for this deal yet. If the April 8 call establishes N=Yes and T=Yes and a $300 deposit is collected, this deal would be qualified under the N+T+$300 rule even if other BANT criteria remain open.
+
+---
+
+### Qualification Summary
+
+| Section | Result |
+|---|---|
+| Tech Eligibility | ⚠️ Incomplete (TAT not discussed) |
+| B — Budget | ❌ Unknown (never raised) |
+| A — Authority | ⚠️ Partial (criteria yes, approval chain no) |
+| N — Need | ❌ Unknown (end-to-end never confirmed — MANDATORY) |
+| T — Timeline | ❌ Unknown (never raised) |
+| BANT Score | **0 / 4** |
+| Qualified Deal | ❌ No |
+| N+T+$300 Path | ❌ Not available |
+| CL Status | Not closed lost |
+| Proshot Captured BANT | ⚠️ Partial — surface signals only, critical gaps not flagged |
+
+### Recommended Next Action
+
+The April 8 follow-up must be structured as a discovery call, not just an accuracy debrief:
+
+1. **TAT** — What turnaround time do they need per job? Confirm Beam AI can meet it (Tech Eligible gate)
+2. **Budget (B)** — Introduce pricing: DFY $10K/yr, DIY $7K/yr. Confirm they can invest and agree to licensing model
+3. **Need (N — MANDATORY)** — Ask directly: *"If the accuracy meets your standard, would you use Beam AI as your primary takeoff output, or would your team still do their own takeoff alongside it?"* Must be end-to-end, not partial
+4. **Authority (A)** — *"Beyond you and Max, who else would need to sign off on a decision like this? Is there a procurement or legal step?"*
+5. **Timeline (T)** — *"If the accuracy review goes well, how quickly could you make a decision? Are we talking weeks or months?"*
+
+If N + T both come back Yes and a $300 payment is collected → deal is qualified under the N+T+$300 rule.
 
 ---
 

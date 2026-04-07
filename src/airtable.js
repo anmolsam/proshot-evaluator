@@ -59,6 +59,8 @@ async function logEvaluation(evalResult) {
       'Tiebreaker Verdict': evalResult.tiebreakerResult?.verdict || '',
       'Prompt Rule Generated': evalResult.tiebreakerResult?.prompt_improvement || '',
       'Timestamp': evalResult.timestamp || new Date().toISOString(),
+      // ── BANT fields ──
+      ...buildBantFields(evalResult.bantResult),
     };
 
     const result = await airtableRequest('POST', TABLE, { fields });
@@ -147,6 +149,32 @@ async function getStats() {
   const red = records.filter(r => r['Verdict'] === 'red').length;
 
   return { total, avgScore, green, yellow, red, records };
+}
+
+function buildBantFields(bant) {
+  if (!bant) return {};
+  const a = (q) => (bant[q]?.answer || 'unknown').toLowerCase();
+  const evidence = Object.entries(bant)
+    .filter(([k, v]) => k.startsWith('q') && v?.evidence)
+    .map(([k, v]) => `${k}: ${v.evidence}`)
+    .join('\n');
+
+  return {
+    'BANT Status': bant.q10_bant_status?.answer || 'needs_review',
+    'BANT Score': bant.q10_bant_status?.bant_score || '',
+    'Q1 Trade Supported': a('q1_trade_supported'),
+    'Q2 TAT Aligned': a('q2_tat_aligned'),
+    'Q3 Budget Confirmed': a('q3_budget_confirmed'),
+    'Q4 Decision Criteria': a('q4_decision_criteria'),
+    'Q5 Approval Steps Mapped': a('q5_approval_steps_mapped'),
+    'Q6 Need End to End': a('q6_need_end_to_end'),
+    'Q7 Close Within 90 Days': a('q7_close_within_90_days'),
+    'Q8 Deal Over 50K If Long': a('q8_deal_size_over_50k_if_long'),
+    'Tech Qualified': a('q9_tech_qualified'),
+    'Proshot Captured BANT': bant.proshot_captured_bant?.answer || 'unknown',
+    'BANT Evidence': evidence,
+    'Recommended Next Action': bant.recommended_next_action || '',
+  };
 }
 
 module.exports = { logEvaluation, updateHumanDecision, logRule, fetchAllEvaluations, getStats };

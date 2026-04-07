@@ -2,6 +2,7 @@
 
 const { judgeWithClaude, judgeWithGPT4o } = require('./judges');
 const { runTiebreaker } = require('./tiebreaker');
+const { runBantEvaluation } = require('./bant');
 const { saveRule } = require('./rules');
 const { mergeUnique } = require('./utils');
 
@@ -14,12 +15,16 @@ async function evaluateMeeting(meeting) {
     throw new Error('Meeting has no transcript — cannot evaluate');
   }
 
-  console.log('\n🔬 Running dual-judge evaluation...');
+  console.log('\n🔬 Running dual-judge + BANT evaluation...');
 
-  // Run both judges in parallel
-  const [claudeResult, gptResult] = await Promise.all([
+  // Run both judges AND BANT in parallel
+  const [claudeResult, gptResult, bantResult] = await Promise.all([
     judgeWithClaude(transcript, proshortOutput),
     judgeWithGPT4o(transcript, proshortOutput),
+    runBantEvaluation(transcript, proshortOutput).catch(err => {
+      console.error(`  ⚠️  BANT evaluation failed (non-fatal): ${err.message}`);
+      return null;
+    }),
   ]);
 
   const scoreDiff = Math.abs(claudeResult.overall_score - gptResult.overall_score);
@@ -85,6 +90,7 @@ async function evaluateMeeting(meeting) {
     claudeResult,
     gptResult,
     tiebreakerResult,
+    bantResult,
     missed: mergeUnique(claudeResult.what_proshot_missed, gptResult.what_proshot_missed),
     wrong: mergeUnique(claudeResult.what_proshot_got_wrong, gptResult.what_proshot_got_wrong),
     right: mergeUnique(claudeResult.what_proshot_got_right, gptResult.what_proshot_got_right),

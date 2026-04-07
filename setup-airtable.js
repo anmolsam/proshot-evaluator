@@ -143,6 +143,25 @@ async function main() {
       { name: 'Human Decision', type: 'singleLineText' },
       { name: 'Prompt Rule Generated', type: 'multilineText' },
       { name: 'Timestamp', type: 'dateTime', options: { dateFormat: { name: 'iso' }, timeFormat: { name: '24hour' }, timeZone: 'utc' } },
+      // ── BANT Qualification Fields ──────────────────────────────────────
+      { name: 'BANT Status', type: 'singleSelect', options: { choices: [
+        { name: 'qualified', color: 'greenBright' },
+        { name: 'needs_review', color: 'yellowBright' },
+        { name: 'disqualified', color: 'redBright' },
+      ]}},
+      { name: 'BANT Score', type: 'singleLineText' },
+      { name: 'Q1 Trade Supported', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
+      { name: 'Q2 TAT Aligned', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
+      { name: 'Q3 Budget Confirmed', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
+      { name: 'Q4 Decision Criteria', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
+      { name: 'Q5 Approval Steps Mapped', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
+      { name: 'Q6 Need End to End', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
+      { name: 'Q7 Close Within 90 Days', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
+      { name: 'Q8 Deal Over 50K If Long', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }, { name: 'n/a', color: 'blueBright' }] } },
+      { name: 'Tech Qualified', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'no', color: 'redBright' }, { name: 'unknown', color: 'grayBright' }] } },
+      { name: 'Proshot Captured BANT', type: 'singleSelect', options: { choices: [{ name: 'yes', color: 'greenBright' }, { name: 'partial', color: 'yellowBright' }, { name: 'no', color: 'redBright' }] } },
+      { name: 'BANT Evidence', type: 'multilineText' },
+      { name: 'Recommended Next Action', type: 'multilineText' },
     ].filter(f => !existingFields.includes(f.name));
 
     if (newFields.length > 0) {
